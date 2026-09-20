@@ -1,0 +1,6 @@
+{
+  "name": "H2O Management System",
+  "description": "Commercial Multi-Tenant SaaS Water Manufacturing ERP with tenant isolation, standalone authentication, subscription tiers, multi-plant operations, and real-time financial tracking.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,274 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@layer base {
+  :root {
+    color-scheme: light dark;
+  }
+
+  html.dark {
+    color-scheme: dark;
+  }
+
+  html.light, html:not(.dark) {
+    color-scheme: light;
+  }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    transition: background-color 0.15s ease, color 0.15s ease;
+  }
+
+  html.dark body {
+    background-color: #09090b;
+    color: #f8fafc;
+  }
+
+  html:not(.dark) body {
+    background-color: #f8fafc;
+    color: #0f172a;
+  }
+}
+
+/* =========================================================================
+   Light Mode System Overrides (Active when html does NOT have .dark class)
+   ========================================================================= */
+html:not(.dark):not(:has(.auth-page-root)) {
+  /* Surfaces & Bento Cards */
+  .bg-\[\#09090b\],
+  .bg-slate-900 {
+    background-color: #ffffff !important;
+  }
+
+  .bg-slate-950 {
+    background-color: #f8fafc !important;
+  }
+
+  .bg-slate-900\/80,
+  .bg-slate-900\/90,
+  .bg-\[\#09090b\]\/90 {
+    background-color: rgba(255, 255, 255, 0.95) !important;
+  }
+
+  /* Sub-surfaces (inputs, chips, secondary cards, table headers) */
+  .bg-slate-800,
+  .bg-slate-800\/80,
+  .bg-slate-800\/60,
+  .bg-slate-800\/50,
+  .bg-slate-800\/40 {
+    background-color: #f1f5f9 !important;
+  }
+
+  /* Structural & Component Borders */
+  .border-slate-800,
+  .border-slate-800\/90,
+  .border-slate-800\/80,
+  .border-slate-800\/60,
+  .border-slate-700,
+  .border-slate-700\/60,
+  .border-slate-700\/50 {
+    border-color: #e2e8f0 !important;
+  }
+
+  /* Hover States */
+  .hover\:border-slate-700:hover,
+  .hover\:border-slate-700\/80:hover {
+    border-color: #cbd5e1 !important;
+  }
+
+  .hover\:bg-slate-800:hover,
+  .hover\:bg-slate-800\/60:hover {
+    background-color: #e2e8f0 !important;
+  }
+
+  /* Text & Typography: Headings & Contrast (Preserves text-white inside buttons/badges) */
+  .text-white:not(
+    .bg-blue-600 *,
+    .bg-blue-500 *,
+    .bg-emerald-600 *,
+    .bg-emerald-500 *,
+    .bg-rose-600 *,
+    .bg-rose-500 *,
+    .bg-red-600 *,
+    .bg-red-500 *,
+    .bg-indigo-600 *,
+    .bg-purple-600 *,
+    .bg-amber-600 *,
+    button.bg-blue-600,
+    button.bg-emerald-600,
+    button.bg-rose-600,
+    button.bg-red-600,
+    button.bg-indigo-600,
+    .btn-primary,
+    [class*="bg-blue-600"],
+    [class*="bg-blue-500"],
+    [class*="bg-emerald-600"],
+    [class*="bg-rose-600"],
+    [class*="bg-indigo-600"]
+  ) {
+    color: #0f172a !important;
+  }
+
+  .text-slate-100 {
+    color: #0f172a !important;
+  }
+
+  .text-slate-200 {
+    color: #1e293b !important;
+  }
+
+  .text-slate-300 {
+    color: #334155 !important;
+  }
+
+  .text-slate-400 {
+    color: #64748b !important;
+  }
+
+  .hover\:text-slate-100:hover,
+  .hover\:text-slate-200:hover,
+  .hover\:text-white:hover {
+    color: #0f172a !important;
+  }
+
+  /* Form Inputs and Interactive Controls */
+  input:not([type="checkbox"]):not([type="radio"]),
+  select,
+  textarea {
+    color: #0f172a;
+    background-color: #ffffff;
+  }
+
+  /* Bento Scrollbars */
+  ::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: #94a3b8;
+  }
+}
+
+/* =========================================================================
+   Auth Page Strict Immunity:
+   Preserves exact branded visual design regardless of app/system light mode
+   ========================================================================= */
+.auth-page-root,
+html:not(.dark) .auth-page-root,
+html.light .auth-page-root {
+  background-color: #080d1a !important;
+  color: #f1f5f9 !important;
+}
+
+html:not(.dark) .auth-page-root .auth-right-container,
+html.light .auth-page-root .auth-right-container {
+  background-color: #070b14 !important;
+}
+
+html:not(.dark) .auth-page-root .text-white,
+html.light .auth-page-root .text-white {
+  color: #ffffff !important;
+}
+
+html:not(.dark) .auth-page-root .text-slate-100,
+html.light .auth-page-root .text-slate-100 {
+  color: #f1f5f9 !important;
+}
+
+html:not(.dark) .auth-page-root .text-slate-200,
+html.light .auth-page-root .text-slate-200 {
+  color: #e2e8f0 !important;
+}
+
+html:not(.dark) .auth-page-root .text-slate-300,
+html.light .auth-page-root .text-slate-300 {
+  color: #cbd5e1 !important;
+}
+
+html:not(.dark) .auth-page-root .text-slate-400,
+html.light .auth-page-root .text-slate-400 {
+  color: #94a3b8 !important;
+}
+
+html:not(.dark) .auth-page-root .text-slate-500,
+html.light .auth-page-root .text-slate-500 {
+  color: #64748b !important;
+}
+
+html:not(.dark) .auth-page-root .text-blue-100,
+html.light .auth-page-root .text-blue-100,
+html:not(.dark) .auth-page-root .text-blue-100\/90,
+html.light .auth-page-root .text-blue-100\/90 {
+  color: rgba(219, 234, 254, 0.9) !important;
+}
+
+html:not(.dark) .auth-page-root .text-blue-200,
+html.light .auth-page-root .text-blue-200 {
+  color: #bfdbfe !important;
+}
+
+html:not(.dark) .auth-page-root .text-blue-400,
+html.light .auth-page-root .text-blue-400 {
+  color: #60a5fa !important;
+}
+
+html:not(.dark) .auth-page-root input:not([type="checkbox"]):not([type="radio"]),
+html.light .auth-page-root input:not([type="checkbox"]):not([type="radio"]) {
+  background-color: #0d1424 !important;
+  color: #ffffff !important;
+  border-color: #1e293b !important;
+}
+
+html:not(.dark) .auth-page-root input::placeholder,
+html.light .auth-page-root input::placeholder {
+  color: #64748b !important;
+}
+
+html:not(.dark) .auth-page-root .bg-\[\#0d1424\],
+html.light .auth-page-root .bg-\[\#0d1424\] {
+  background-color: #0d1424 !important;
+}
+
+html:not(.dark) .auth-page-root .bg-\[\#0f172a\],
+html.light .auth-page-root .bg-\[\#0f172a\] {
+  background-color: #0f172a !important;
+}
+
+html:not(.dark) .auth-page-root .bg-\[\#1e293b\],
+html.light .auth-page-root .bg-\[\#1e293b\] {
+  background-color: #1e293b !important;
+}
+
+html:not(.dark) .auth-page-root .border-slate-800,
+html.light .auth-page-root .border-slate-800,
+html:not(.dark) .auth-page-root .border-slate-800\/80,
+html.light .auth-page-root .border-slate-800\/80 {
+  border-color: #1e293b !important;
+}
+
+html:not(.dark) .auth-page-root .border-slate-700,
+html.light .auth-page-root .border-slate-700 {
+  border-color: #334155 !important;
+}
+
+/* Dark Mode Scrollbars */
+html.dark ::-webkit-scrollbar-thumb {
+  background: #27272a;
+}
+
+html.dark ::-webkit-scrollbar-thumb:hover {
+  background: #3f3f46;
+}
+
+/* Base scrollbar geometry */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}

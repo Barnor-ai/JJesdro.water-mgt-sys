@@ -1,0 +1,21 @@
+{
+  "id": "/",
+  "name": "H2O Management System",
+  "short_name": "H2O System",
+  "description": "Commercial multi-tenant water manufacturing ERP for batch production, inventory, sales, customer credit, and financial management.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#09090b",
+  "theme_color": "#2563eb",
+  "categories": ["business", "productivity", "utilities"],
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

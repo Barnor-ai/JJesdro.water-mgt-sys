@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>H2O Management System</title>
+    <meta name="description" content="Commercial Multi-Tenant SaaS Water Manufacturing ERP with tenant isolation, standalone authentication, subscription tiers, multi-plant operations, and real-time financial tracking." />
+    <meta property="og:title" content="H2O Management System" />
+    <meta property="og:description" content="Commercial Multi-Tenant SaaS Water Manufacturing ERP with tenant isolation, standalone authentication, subscription tiers, multi-plant operations, and real-time financial tracking." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="theme-color" content="#2563eb" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="H2O System" />
+    <script>
+      (function() {
+        try {
+          var stored = localStorage.getItem('h2o_erp_v2_theme');
+          var theme = stored ? JSON.parse(stored) : 'dark';
+          if (theme === 'dark') {
+            document.documentElement.classList.add('dark');
+            document.documentElement.classList.remove('light');
+          } else {
+            document.documentElement.classList.remove('dark');
+            document.documentElement.classList.add('light');
+          }
+        } catch (e) {
+          document.documentElement.classList.add('dark');
+        }
+
+        // Register Service Worker for PWA
+        if ('serviceWorker' in navigator && window.location.protocol === 'https:') {
+          window.addEventListener('load', function() {
+            navigator.serviceWorker.register('/sw.js').catch(function() {});
+          });
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+

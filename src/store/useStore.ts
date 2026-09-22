@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   UserProfile,
   UserRole,
@@ -104,6 +104,21 @@ function sanitizeOrganization(org: any): Organization {
   };
 }
 
+function deduplicateOrganizations(orgs: any[]): Organization[] {
+  if (!Array.isArray(orgs)) return [initialOrganizations[0]];
+  const seen = new Set<string>();
+  const unique: Organization[] = [];
+  for (const raw of orgs) {
+    const org = sanitizeOrganization(raw);
+    if (!org || !org.id) continue;
+    if (!seen.has(org.id)) {
+      seen.add(org.id);
+      unique.push(org);
+    }
+  }
+  return unique.length > 0 ? unique : [initialOrganizations[0]];
+}
+
 export function sanitizeBranch(b: any): Branch {
   if (!b || typeof b !== 'object') {
     return initialBranches[0];
@@ -193,7 +208,7 @@ const globalState: ERPStoreState = {
   currentOrganization: sanitizeOrganization(loadStored('current_org', initialOrganizations[0])),
   currentSubscription: sanitizeSubscription(loadStored('subscription', initialSubscriptions[0])),
   subscriptionPlans: initialSubscriptionPlans,
-  organizations: loadStored<Organization[]>('organizations', initialOrganizations).map(sanitizeOrganization),
+  organizations: deduplicateOrganizations(loadStored<Organization[]>('organizations', initialOrganizations)),
   organizationMembers: loadStored<OrganizationMember[]>('org_members', initialOrganizationMembers),
   invitations: loadStored<Invitation[]>('invitations', initialInvitations),
   billingRecords: loadStored<BillingRecord[]>('billing_records', initialBillingRecords),
@@ -958,7 +973,7 @@ export function useERPStore() {
       });
     }
 
-    globalState.organizations = [newOrg, ...globalState.organizations];
+    globalState.organizations = deduplicateOrganizations([newOrg, ...globalState.organizations]);
     globalState.currentOrganization = newOrg;
     globalState.currentSubscription = newSub;
     globalState.organizationMembers = [ownerMember, ...globalState.organizationMembers];
@@ -1005,7 +1020,7 @@ export function useERPStore() {
       ...updates,
     };
     globalState.currentOrganization = updated;
-    globalState.organizations = globalState.organizations.map((o) => (o.id === updated.id ? updated : o));
+    globalState.organizations = deduplicateOrganizations(globalState.organizations.map((o) => (o.id === updated.id ? updated : o)));
     saveStored('current_org', updated);
     saveStored('organizations', globalState.organizations);
     addAuditLog('UPDATE', 'organizations', updated.id, updates);

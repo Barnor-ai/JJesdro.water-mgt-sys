@@ -670,9 +670,9 @@ export function SettingsPage() {
               </Button>
             </CardHeader>
             <CardContent className="space-y-3">
-              {orgBranches.map((b) => (
+              {orgBranches.map((b, idx) => (
                 <div
-                  key={b.id}
+                  key={`${b.id}-${idx}`}
                   className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3"
                 >
                   <div className="min-w-0 flex-1">

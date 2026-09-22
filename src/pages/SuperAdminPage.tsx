@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useERPStore } from '../store/useStore';
 import { Organization, SubscriptionPlanId } from '../types/database';
 import {
@@ -47,18 +47,29 @@ export function SuperAdminPage() {
   const [pentestReport, setPentestReport] = useState<CrossTenantAuditReport | null>(null);
   const [showPentestModal, setShowPentestModal] = useState(false);
 
-  // Calculate platform metrics
-  const totalOrgs = organizations.length;
-  const activeSubs = organizations.filter((o) => o.status === 'active').length;
+  // Ensure unique organizations by id to prevent duplicate child keys
+  const uniqueOrgs = useMemo(() => {
+    const seen = new Set<string>();
+    return organizations.filter((org) => {
+      if (!org || !org.id) return false;
+      if (seen.has(org.id)) return false;
+      seen.add(org.id);
+      return true;
+    });
+  }, [organizations]);
 
-  const totalMRR = organizations.reduce((acc, org) => {
+  // Calculate platform metrics
+  const totalOrgs = uniqueOrgs.length;
+  const activeSubs = uniqueOrgs.filter((o) => o.status === 'active').length;
+
+  const totalMRR = uniqueOrgs.reduce((acc, org) => {
     const plan = subscriptionPlans.find((p) => p.id === org.plan_id);
     return acc + (plan?.priceMonthly || 29);
   }, 0);
 
   const totalPlatformUsers = organizationMembers.length;
 
-  const filteredOrgs = organizations.filter(
+  const filteredOrgs = uniqueOrgs.filter(
     (o) =>
       o.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       o.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -268,13 +279,13 @@ export function SuperAdminPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 text-slate-700 dark:text-slate-300">
-              {filteredOrgs.map((org) => {
+              {filteredOrgs.map((org, index) => {
                 const isCurrent = org.id === currentOrganization?.id;
                 const membersInOrg = organizationMembers.filter((m) => m.organization_id === org.id).length;
                 const plan = subscriptionPlans.find((p) => p.id === org.plan_id);
 
                 return (
-                  <tr key={org.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-900/30 transition-colors">
+                  <tr key={`${org.id}-${index}`} className="hover:bg-slate-50/50 dark:hover:bg-slate-900/30 transition-colors">
                     <td className="py-4 px-6">
                       <div className="font-bold text-slate-900 dark:text-white flex items-center gap-2">
                         {org.name}

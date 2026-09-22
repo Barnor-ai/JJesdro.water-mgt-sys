@@ -31,11 +31,20 @@
           document.documentElement.classList.add('dark');
         }
 
-        // Register Service Worker for PWA
-        if ('serviceWorker' in navigator && window.location.protocol === 'https:') {
-          window.addEventListener('load', function() {
-            navigator.serviceWorker.register('/sw.js').catch(function() {});
-          });
+        // Unregister any active service worker and clear stale caches to prevent module conflicts in preview
+        if ('serviceWorker' in navigator) {
+          navigator.serviceWorker.getRegistrations().then(function(registrations) {
+            for (var i = 0; i < registrations.length; i++) {
+              registrations[i].unregister();
+            }
+          }).catch(function() {});
+        }
+        if ('caches' in window) {
+          caches.keys().then(function(names) {
+            for (var i = 0; i < names.length; i++) {
+              caches.delete(names[i]);
+            }
+          }).catch(function() {});
         }
       })();
     </script>

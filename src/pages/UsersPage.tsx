@@ -183,8 +183,8 @@ export function UsersPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                {activeMembers.map((m) => (
-                  <tr key={m.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/40">
+                {activeMembers.map((m, idx) => (
+                  <tr key={`${m.id}-${idx}`} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/40">
                     <td className="p-3.5 pl-5">
                       <div className="flex items-center gap-3">
                         <div className="w-8 h-8 rounded-full bg-blue-600/15 text-blue-600 dark:text-blue-400 font-bold flex items-center justify-center text-xs">
@@ -280,8 +280,8 @@ export function UsersPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                  {currentOrgInvites.map((inv) => (
-                    <tr key={inv.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/40">
+                  {currentOrgInvites.map((inv, idx) => (
+                    <tr key={`${inv.id}-${idx}`} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/40">
                       <td className="p-3.5 pl-5 font-semibold text-slate-900 dark:text-white">
                         {inv.email}
                       </td>

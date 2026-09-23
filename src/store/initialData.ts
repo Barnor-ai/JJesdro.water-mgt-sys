@@ -22,6 +22,9 @@ import {
   BillingRecord,
   Invitation,
   ApprovalWorkflow,
+  ProductionBudget,
+  ChartOfAccount,
+  JournalEntry,
 } from '../types/database';
 
 export const initialSubscriptionPlans: SubscriptionPlan[] = [
@@ -1171,6 +1174,7 @@ export const initialExpenses: Expense[] = [
     expense_number: 'EXP-2026-0081',
     category: 'Electricity & Utilities',
     amount: 1450.0,
+    date: '2026-08-20',
     expense_date: '2026-08-20',
     payment_method: 'Bank Wire',
     payee: 'Valley Electric Power Grid',
@@ -1184,6 +1188,7 @@ export const initialExpenses: Expense[] = [
     expense_number: 'EXP-2026-0082',
     category: 'Machine Maintenance',
     amount: 680.0,
+    date: '2026-08-18',
     expense_date: '2026-08-18',
     payment_method: 'Corporate Card',
     payee: 'Krones Certified Industrial Technicians',
@@ -1197,6 +1202,7 @@ export const initialExpenses: Expense[] = [
     expense_number: 'EXP-2026-0083',
     category: 'Fuel & Fleet Logistics',
     amount: 820.0,
+    date: '2026-08-22',
     expense_date: '2026-08-22',
     payment_method: 'Fuel Card',
     payee: 'Chevron Commercial Fleet',
@@ -1313,5 +1319,154 @@ export const initialNotifications: AppNotification[] = [
     timestamp: '2026-08-23T09:00:00Z',
     read: true,
     link: '/production',
+  },
+];
+
+export const initialProductionBudgets: ProductionBudget[] = [
+  {
+    id: 'budget-1',
+    organization_id: 'org-default',
+    branch_id: 'branch-1',
+    product_name: '500ml Bottled Spring Water',
+    bottle_size: '500ml',
+    period: '2026-09',
+    period_type: 'month',
+    budgeted_production_quantity: 120000,
+    budgeted_raw_material_consumption: 121500,
+    budgeted_labour_cost: 3200,
+    budgeted_packaging_cost: 2800,
+    budgeted_overhead: 1900,
+    budgeted_production_cost: 16500,
+    budgeted_sales_quantity: 115000,
+    budgeted_revenue: 40250,
+    notes: 'Q3 standard operating budget for primary 500ml bottling line',
+    created_at: '2026-09-01T08:00:00Z',
+  },
+  {
+    id: 'budget-2',
+    organization_id: 'org-default',
+    branch_id: 'branch-1',
+    product_name: '1.5L Bottled Mineral Water',
+    bottle_size: '1.5L',
+    period: '2026-09',
+    period_type: 'month',
+    budgeted_production_quantity: 60000,
+    budgeted_raw_material_consumption: 60800,
+    budgeted_labour_cost: 2100,
+    budgeted_packaging_cost: 1800,
+    budgeted_overhead: 1200,
+    budgeted_production_cost: 11400,
+    budgeted_sales_quantity: 58000,
+    budgeted_revenue: 29000,
+    notes: 'Bulk consumer hydration target',
+    created_at: '2026-09-01T08:00:00Z',
+  },
+  {
+    id: 'budget-3',
+    organization_id: 'org-default',
+    branch_id: 'branch-1',
+    product_name: '19L Dispenser Bottle',
+    bottle_size: '19L',
+    period: '2026-09',
+    period_type: 'month',
+    budgeted_production_quantity: 15000,
+    budgeted_raw_material_consumption: 15100,
+    budgeted_labour_cost: 1800,
+    budgeted_packaging_cost: 1200,
+    budgeted_overhead: 950,
+    budgeted_production_cost: 6500,
+    budgeted_sales_quantity: 14500,
+    budgeted_revenue: 21750,
+    notes: 'Commercial office dispenser bottle exchange program',
+    created_at: '2026-09-01T08:00:00Z',
+  },
+];
+
+export const initialChartOfAccounts: ChartOfAccount[] = [
+  // 1000 - Assets
+  { id: 'coa-1010', code: '1010', name: 'Cash on Hand & Petty Cash', category: 'Asset', sub_category: 'Current Assets', normal_balance: 'Debit', current_balance: 14850, is_system: true },
+  { id: 'coa-1020', code: '1020', name: 'Commercial Operating Bank Account', category: 'Asset', sub_category: 'Current Assets', normal_balance: 'Debit', current_balance: 92450, is_system: true },
+  { id: 'coa-1030', code: '1030', name: 'Accounts Receivable (Debtors)', category: 'Asset', sub_category: 'Current Assets', normal_balance: 'Debit', current_balance: 28940, is_system: true },
+  { id: 'coa-1040', code: '1040', name: 'Raw Materials & Preforms Inventory', category: 'Asset', sub_category: 'Current Assets', normal_balance: 'Debit', current_balance: 38700, is_system: true },
+  { id: 'coa-1050', code: '1050', name: 'Finished Bottled Goods Inventory', category: 'Asset', sub_category: 'Current Assets', normal_balance: 'Debit', current_balance: 46200, is_system: true },
+  { id: 'coa-1510', code: '1510', name: 'Bottling Machinery & Reverse Osmosis Plant', category: 'Asset', sub_category: 'Non-Current Assets', normal_balance: 'Debit', current_balance: 185000, is_system: true },
+  { id: 'coa-1520', code: '1520', name: 'Fleet Delivery Trucks & Vans', category: 'Asset', sub_category: 'Non-Current Assets', normal_balance: 'Debit', current_balance: 74000, is_system: true },
+  { id: 'coa-1530', code: '1530', name: 'Factory Land & Spring Leasehold', category: 'Asset', sub_category: 'Non-Current Assets', normal_balance: 'Debit', current_balance: 120000, is_system: true },
+
+  // 2000 - Liabilities
+  { id: 'coa-2010', code: '2010', name: 'Accounts Payable (Suppliers & Vendors)', category: 'Liability', sub_category: 'Current Liabilities', normal_balance: 'Credit', current_balance: 24650, is_system: true },
+  { id: 'coa-2020', code: '2020', name: 'Accrued Bottling Plant Payroll', category: 'Liability', sub_category: 'Current Liabilities', normal_balance: 'Credit', current_balance: 8200, is_system: true },
+  { id: 'coa-2030', code: '2030', name: 'Sales Tax & VAT Liability', category: 'Liability', sub_category: 'Current Liabilities', normal_balance: 'Credit', current_balance: 6420, is_system: true },
+  { id: 'coa-2510', code: '2510', name: 'Long-Term Equipment Loan Financing', category: 'Liability', sub_category: 'Non-Current Liabilities', normal_balance: 'Credit', current_balance: 55000, is_system: true },
+
+  // 3000 - Equity
+  { id: 'coa-3010', code: '3010', name: 'Paid-Up Share Capital', category: 'Equity', sub_category: 'Equity', normal_balance: 'Credit', current_balance: 250000, is_system: true },
+  { id: 'coa-3020', code: '3020', name: 'Retained Earnings', category: 'Equity', sub_category: 'Equity', normal_balance: 'Credit', current_balance: 165400, is_system: true },
+  { id: 'coa-3030', code: '3030', name: 'Current Year Operating Net Profit', category: 'Equity', sub_category: 'Equity', normal_balance: 'Credit', current_balance: 90470, is_system: true },
+
+  // 4000 - Revenue
+  { id: 'coa-4010', code: '4010', name: 'Packaged Water Sales Revenue', category: 'Revenue', sub_category: 'Operating Revenue', normal_balance: 'Credit', current_balance: 215400, is_system: true },
+  { id: 'coa-4020', code: '4020', name: 'Dispenser Rental & Delivery Surcharges', category: 'Revenue', sub_category: 'Other Revenue', normal_balance: 'Credit', current_balance: 9800, is_system: true },
+
+  // 5000 - Cost of Sales
+  { id: 'coa-5010', code: '5010', name: 'Direct Raw Materials (PET Preforms & Caps)', category: 'Cost of Sales', sub_category: 'Direct Costs', normal_balance: 'Debit', current_balance: 58400, is_system: true },
+  { id: 'coa-5020', code: '5020', name: 'Direct Production Line Labour', category: 'Cost of Sales', sub_category: 'Direct Costs', normal_balance: 'Debit', current_balance: 19500, is_system: true },
+  { id: 'coa-5030', code: '5030', name: 'Packaging, Cartons & Shrink Wrap', category: 'Cost of Sales', sub_category: 'Direct Costs', normal_balance: 'Debit', current_balance: 14200, is_system: true },
+
+  // 6000 - Operating Expenses
+  { id: 'coa-6010', code: '6010', name: 'Factory Electricity & Power', category: 'Operating Expense', sub_category: 'Utilities', normal_balance: 'Debit', current_balance: 11200, is_system: true },
+  { id: 'coa-6020', code: '6020', name: 'Generator Diesel & Fuel', category: 'Operating Expense', sub_category: 'Utilities', normal_balance: 'Debit', current_balance: 6500, is_system: true },
+  { id: 'coa-6030', code: '6030', name: 'Machinery Maintenance & Overhauls', category: 'Operating Expense', sub_category: 'Repairs & Maintenance', normal_balance: 'Debit', current_balance: 4800, is_system: true },
+  { id: 'coa-6040', code: '6040', name: 'Plant Administrative & Management Salaries', category: 'Operating Expense', sub_category: 'Personnel', normal_balance: 'Debit', current_balance: 18400, is_system: true },
+];
+
+export const initialJournalEntries: JournalEntry[] = [
+  {
+    id: 'je-1',
+    organization_id: 'org-default',
+    entry_number: 'JE-2026-0001',
+    date: '2026-08-20',
+    reference: 'PO-94821',
+    description: 'Raw Materials Procurement: PET Preforms & Caps received into warehouse inventory',
+    lines: [
+      { account_code: '1040', account_name: 'Raw Materials & Preforms Inventory', debit: 12500, credit: 0, description: 'Stock received' },
+      { account_code: '2010', account_name: 'Accounts Payable (Suppliers & Vendors)', debit: 0, credit: 12500, description: 'Vendor payable' },
+    ],
+    total_amount: 12500,
+    status: 'Posted',
+    created_by: 'Accountant',
+    created_at: '2026-08-20T10:00:00Z',
+  },
+  {
+    id: 'je-2',
+    organization_id: 'org-default',
+    entry_number: 'JE-2026-0002',
+    date: '2026-08-22',
+    reference: 'INV-2026-00101',
+    description: 'Wholesale Dispatch to Metro Supermarkets Group on 14-day credit terms',
+    lines: [
+      { account_code: '1030', account_name: 'Accounts Receivable (Debtors)', debit: 5460, credit: 0, description: 'Receivable from Metro' },
+      { account_code: '4010', account_name: 'Packaged Water Sales Revenue', debit: 0, credit: 5460, description: 'Water revenue' },
+    ],
+    total_amount: 5460,
+    status: 'Posted',
+    created_by: 'Accountant',
+    created_at: '2026-08-22T14:30:00Z',
+  },
+  {
+    id: 'je-3',
+    organization_id: 'org-default',
+    entry_number: 'JE-2026-0003',
+    date: '2026-08-24',
+    reference: 'BANK-TRF-491',
+    description: 'Direct settlement of monthly electrical power utility to municipal provider',
+    lines: [
+      { account_code: '6010', account_name: 'Factory Electricity & Power', debit: 3400, credit: 0, description: 'Monthly electricity bill' },
+      { account_code: '1020', account_name: 'Commercial Operating Bank Account', debit: 0, credit: 3400, description: 'Bank wire' },
+    ],
+    total_amount: 3400,
+    status: 'Posted',
+    created_by: 'Accountant',
+    created_at: '2026-08-24T11:15:00Z',
   },
 ];

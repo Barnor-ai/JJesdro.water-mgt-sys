@@ -45,10 +45,10 @@ export function MachinesPage() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h2 className="text-2xl font-extrabold text-slate-900 dark:text-white">
-            Bottling Machinery & Line Telemetry
+            Bottling Machinery & Line Equipment
           </h2>
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            Real-time status of blow molders, rotary rinse-fill-cappers, sleeve labelers, and packagers
+            Real-time status of blow molders, rotary rinse-fill-cappers, sleeve labelers, and packaging lines
           </p>
         </div>
       </div>

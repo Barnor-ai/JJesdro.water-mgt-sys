@@ -31,9 +31,17 @@ import {
   Building2,
   PanelLeftClose,
   PanelLeftOpen,
+  ChevronDown,
+  ChevronRight,
 } from 'lucide-react';
 import { useERPStore } from '../../store/useStore';
 import { UserRole } from '../../types/database';
+
+export interface SubNavItem {
+  name: string;
+  href: string;
+  tab: string;
+}
 
 export interface NavItem {
   name: string;
@@ -42,6 +50,7 @@ export interface NavItem {
   roles: UserRole[];
   badge?: string;
   group?: 'core' | 'operations' | 'commercial' | 'financial' | 'admin';
+  subItems?: SubNavItem[];
 }
 
 interface SidebarProps {
@@ -78,6 +87,9 @@ export function Sidebar({
   } = useERPStore();
 
   const location = useLocation();
+  const [financialsOpen, setFinancialsOpen] = React.useState(() => {
+    return location.pathname.includes('/financial') || location.pathname.includes('/expenses');
+  });
 
   const lowStockCount = finishedGoods.filter((fg) => fg.current_stock <= fg.min_stock).length;
   const operationalMachines = machines.filter((m) => m.status === 'Operational').length;
@@ -85,7 +97,6 @@ export function Sidebar({
 
   const allRoles: UserRole[] = [
     'owner',
-    'super_admin',
     'admin',
     'factory_manager',
     'production_manager',
@@ -99,7 +110,7 @@ export function Sidebar({
     'viewer',
   ];
 
-  const adminRoles: UserRole[] = ['owner', 'super_admin', 'admin'];
+  const adminRoles: UserRole[] = ['owner', 'admin'];
 
   const navigationItems: NavItem[] = [
     // Core Dashboards
@@ -111,25 +122,37 @@ export function Sidebar({
       group: 'core',
     },
     {
-      name: 'Production OEE',
+      name: 'Production Analytics',
       href: '/production-dash',
       icon: TrendingUp,
-      roles: ['owner', 'super_admin', 'admin', 'factory_manager', 'production_manager', 'auditor'],
+      roles: ['owner', 'admin', 'factory_manager', 'production_manager', 'auditor'],
       group: 'core',
     },
     {
       name: 'Revenue Analytics',
       href: '/revenue-dash',
       icon: DollarSign,
-      roles: ['owner', 'super_admin', 'admin', 'sales_manager', 'sales_officer', 'accountant', 'auditor'],
+      roles: ['owner', 'admin', 'sales_manager', 'sales_officer', 'accountant', 'auditor'],
       group: 'core',
     },
     {
-      name: 'Financial P&L',
-      href: '/financial-dash',
+      name: 'Financials',
+      href: '/financials',
       icon: DollarSign,
-      roles: ['owner', 'super_admin', 'admin', 'accountant', 'auditor'],
+      roles: ['owner', 'admin', 'accountant', 'auditor'],
       group: 'core',
+      subItems: [
+        { name: 'Profit & Loss', href: '/financials?tab=pl', tab: 'pl' },
+        { name: 'Balance Sheet', href: '/financials?tab=balance_sheet', tab: 'balance_sheet' },
+        { name: 'Production Budget', href: '/financials?tab=budget', tab: 'budget' },
+        { name: 'Actuals', href: '/financials?tab=actuals', tab: 'actuals' },
+        { name: 'Variance Analysis', href: '/financials?tab=variance', tab: 'variance' },
+        { name: 'Expenses', href: '/financials?tab=expenses', tab: 'expenses' },
+        { name: 'Chart of Accounts', href: '/financials?tab=coa', tab: 'coa' },
+        { name: 'General Ledger', href: '/financials?tab=ledger', tab: 'ledger' },
+        { name: 'Journal Entries', href: '/financials?tab=journal', tab: 'journal' },
+        { name: 'Trial Balance', href: '/financials?tab=trial_balance', tab: 'trial_balance' },
+      ],
     },
 
     // Operations & Manufacturing
@@ -137,14 +160,14 @@ export function Sidebar({
       name: 'Production',
       href: '/production',
       icon: Factory,
-      roles: ['owner', 'super_admin', 'admin', 'factory_manager', 'production_manager', 'production_officer'],
+      roles: ['owner', 'admin', 'factory_manager', 'production_manager', 'production_officer'],
       group: 'operations',
     },
     {
       name: 'Inventory',
       href: '/inventory',
       icon: Package,
-      roles: ['owner', 'super_admin', 'admin', 'factory_manager', 'production_manager', 'warehouse_manager', 'warehouse_officer'],
+      roles: ['owner', 'admin', 'factory_manager', 'production_manager', 'warehouse_manager', 'warehouse_officer'],
       badge: lowStockCount > 0 ? `${lowStockCount}` : undefined,
       group: 'operations',
     },
@@ -152,14 +175,14 @@ export function Sidebar({
       name: 'Warehouse',
       href: '/inventory-dash',
       icon: Warehouse,
-      roles: ['owner', 'super_admin', 'admin', 'factory_manager', 'warehouse_manager', 'warehouse_officer'],
+      roles: ['owner', 'admin', 'factory_manager', 'warehouse_manager', 'warehouse_officer'],
       group: 'operations',
     },
     {
       name: 'Machinery',
       href: '/machines',
       icon: Cpu,
-      roles: ['owner', 'super_admin', 'admin', 'factory_manager', 'production_manager', 'production_officer'],
+      roles: ['owner', 'admin', 'factory_manager', 'production_manager', 'production_officer'],
       badge: `${operationalMachines}/${machines.length}`,
       group: 'operations',
     },
@@ -169,44 +192,37 @@ export function Sidebar({
       name: 'Sales / POS',
       href: '/sales',
       icon: ShoppingCart,
-      roles: ['owner', 'super_admin', 'admin', 'sales_manager', 'sales_officer', 'accountant'],
+      roles: ['owner', 'admin', 'sales_manager', 'sales_officer', 'accountant'],
       group: 'commercial',
     },
     {
       name: 'Customers',
       href: '/customers',
       icon: Users,
-      roles: ['owner', 'super_admin', 'admin', 'sales_manager', 'sales_officer', 'accountant'],
+      roles: ['owner', 'admin', 'sales_manager', 'sales_officer', 'accountant'],
       group: 'commercial',
     },
     {
       name: 'Suppliers',
       href: '/suppliers',
       icon: Truck,
-      roles: ['owner', 'super_admin', 'admin', 'factory_manager', 'production_manager', 'warehouse_manager', 'warehouse_officer', 'accountant'],
+      roles: ['owner', 'admin', 'factory_manager', 'production_manager', 'warehouse_manager', 'warehouse_officer', 'accountant'],
       group: 'commercial',
     },
     {
       name: 'Purchases',
       href: '/purchases',
       icon: FileText,
-      roles: ['owner', 'super_admin', 'admin', 'warehouse_manager', 'warehouse_officer', 'accountant'],
+      roles: ['owner', 'admin', 'warehouse_manager', 'warehouse_officer', 'accountant'],
       group: 'commercial',
     },
 
     // Financial Control & Intelligence
     {
-      name: 'Expenses',
-      href: '/expenses',
-      icon: Receipt,
-      roles: ['owner', 'super_admin', 'admin', 'accountant'],
-      group: 'financial',
-    },
-    {
       name: 'Approvals',
       href: '/approvals',
       icon: CheckSquare,
-      roles: ['owner', 'super_admin', 'admin', 'factory_manager', 'accountant'],
+      roles: ['owner', 'admin', 'factory_manager', 'accountant'],
       badge: pendingApprovals > 0 ? `${pendingApprovals}` : undefined,
       group: 'financial',
     },
@@ -230,7 +246,7 @@ export function Sidebar({
       name: 'Plan & Billing',
       href: '/billing',
       icon: CreditCard,
-      roles: ['owner', 'super_admin', 'admin', 'accountant'],
+      roles: ['owner', 'admin', 'accountant'],
       badge: (currentSubscription?.plan_id || 'pro').toUpperCase(),
       group: 'admin',
     },
@@ -238,14 +254,7 @@ export function Sidebar({
       name: 'Audit Trail',
       href: '/audit-logs',
       icon: History,
-      roles: ['owner', 'super_admin', 'admin', 'auditor'],
-      group: 'admin',
-    },
-    {
-      name: 'Super Admin',
-      href: '/super-admin',
-      icon: Globe,
-      roles: ['super_admin', 'owner'],
+      roles: ['owner', 'admin', 'auditor'],
       group: 'admin',
     },
     {
@@ -300,12 +309,12 @@ export function Sidebar({
             to="/"
             onClick={handleClose}
             className={`flex items-center gap-2.5 group cursor-pointer ${isCollapsed ? 'justify-center' : ''}`}
-            title={currentOrganization?.name || 'H2O System'}
+            title={currentOrganization?.name?.trim() || 'Company Name'}
           >
             {currentOrganization?.logo_url ? (
               <img
                 src={currentOrganization.logo_url}
-                alt={currentOrganization.name}
+                alt={currentOrganization?.name?.trim() || 'Company Logo'}
                 className="w-8 h-8 rounded-lg object-contain bg-white dark:bg-slate-800 p-0.5 border border-slate-200 dark:border-slate-700 shadow-xs group-hover:scale-105 transition-transform shrink-0"
               />
             ) : (
@@ -317,7 +326,7 @@ export function Sidebar({
             {!isCollapsed && (
               <div className="min-w-0">
                 <span className="font-semibold text-sm tracking-tight text-slate-900 dark:text-white block leading-tight truncate max-w-[140px]">
-                  {currentOrganization?.name || 'H2O System'}
+                  {currentOrganization?.name?.trim() || 'Company Name'}
                 </span>
                 <span className="text-[10px] text-blue-600 dark:text-blue-400 font-medium block truncate">
                   Enterprise ERP
@@ -381,6 +390,107 @@ export function Sidebar({
           const Icon = item.icon;
           const active = isLinkActive(item.href);
 
+          if (item.subItems) {
+            const isChildActive =
+              active ||
+              item.subItems.some(
+                (s) =>
+                  location.pathname === s.href.split('?')[0] &&
+                  (!s.href.includes('?') || location.search.includes(s.tab))
+              );
+
+            return (
+              <div key={item.name} className="space-y-0.5">
+                <div
+                  onClick={() => {
+                    if (isCollapsed) {
+                      handleClose();
+                    } else {
+                      setFinancialsOpen(!financialsOpen);
+                    }
+                  }}
+                  className={`w-full flex items-center justify-between rounded-lg font-medium transition-all duration-150 cursor-pointer text-xs ${
+                    isCollapsed
+                      ? 'justify-center px-2 py-2.5 relative group'
+                      : 'px-3 py-2'
+                  } ${
+                    isChildActive
+                      ? 'bg-blue-600/10 text-blue-600 dark:text-blue-400 font-semibold border border-blue-500/20'
+                      : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/60 hover:text-slate-900 dark:hover:text-slate-100'
+                  }`}
+                  title={isCollapsed ? item.name : undefined}
+                >
+                  <NavLink
+                    to={item.href}
+                    onClick={(e) => {
+                      if (!isCollapsed) {
+                        e.stopPropagation();
+                        setFinancialsOpen(!financialsOpen);
+                      }
+                    }}
+                    className="flex items-center gap-2.5 flex-1 min-w-0"
+                  >
+                    <Icon
+                      className={`w-4 h-4 shrink-0 ${
+                        isChildActive ? 'text-blue-600 dark:text-blue-400' : 'text-slate-500 dark:text-slate-400'
+                      }`}
+                    />
+                    {!isCollapsed && <span className="truncate">{item.name}</span>}
+                  </NavLink>
+
+                  {!isCollapsed && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setFinancialsOpen(!financialsOpen);
+                      }}
+                      className="p-0.5 hover:text-slate-900 dark:hover:text-white"
+                      aria-label="Toggle sub-navigation"
+                    >
+                      {financialsOpen ? (
+                        <ChevronDown className="w-3.5 h-3.5" />
+                      ) : (
+                        <ChevronRight className="w-3.5 h-3.5" />
+                      )}
+                    </button>
+                  )}
+                </div>
+
+                {financialsOpen && !isCollapsed && (
+                  <div className="pl-4 pr-1 py-1 space-y-0.5 border-l-2 border-slate-200 dark:border-slate-800 ml-4 animate-in fade-in">
+                    {item.subItems.map((sub) => {
+                      const isSubActive =
+                        (location.pathname === '/financials' || location.pathname === '/financial-dash')
+                          ? location.search.includes(`tab=${sub.tab}`) || (sub.tab === 'pl' && !location.search.includes('tab='))
+                          : location.pathname === sub.href.split('?')[0];
+
+                      return (
+                        <NavLink
+                          key={sub.name}
+                          to={sub.href}
+                          onClick={handleClose}
+                          className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[11px] font-medium transition-colors ${
+                            isSubActive
+                              ? 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/40 font-semibold'
+                              : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/40'
+                          }`}
+                        >
+                          <span
+                            className={`w-1.5 h-1.5 rounded-full ${
+                              isSubActive ? 'bg-blue-600 dark:bg-blue-400' : 'bg-slate-300 dark:bg-slate-600'
+                            }`}
+                          />
+                          <span className="truncate">{sub.name}</span>
+                        </NavLink>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          }
+
           return (
             <NavLink
               key={item.name}
@@ -431,11 +541,11 @@ export function Sidebar({
           <div className="flex items-center justify-between px-1">
             <span
               className={`text-[10px] font-semibold px-2 py-0.5 rounded border capitalize ${
-                roleBadgeStyle[activeRole || 'super_admin'] ||
+                roleBadgeStyle[activeRole || 'owner'] ||
                 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700'
               }`}
             >
-              {(activeRole || 'super_admin').replace('_', ' ')}
+              {(activeRole || 'owner').replace('_', ' ')}
             </span>
 
             <button

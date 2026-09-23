@@ -68,7 +68,7 @@ export function ProductionDashboard({ onNavigate }: { onNavigate: (page: string)
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h2 className="text-2xl font-extrabold text-slate-900 dark:text-white">
-            Plant Production & Machine OEE Telemetry
+            Plant Production & Machine Performance
           </h2>
           <p className="text-xs text-slate-500 dark:text-slate-400">
             Real-time bottling yields, scrap rates, operator accountability, and line efficiency
@@ -97,7 +97,7 @@ export function ProductionDashboard({ onNavigate }: { onNavigate: (page: string)
         />
 
         <KPITile
-          title="Plant Efficiency (OEE)"
+          title="Plant Efficiency"
           value={`${avgEfficiency}%`}
           subtitle="Target: ≥ 95.0%"
           trend={1.2}
@@ -172,13 +172,13 @@ export function ProductionDashboard({ onNavigate }: { onNavigate: (page: string)
 
       {/* Machine Statuses & Operator Accountability */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Machine Lines Telemetry */}
+        {/* Machine Lines Performance */}
         <Card>
           <CardHeader className="flex flex-row items-center justify-between">
             <div>
               <CardTitle>Machine Line Performance</CardTitle>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Continuous bottling line telemetry & cycle speed
+                Continuous bottling line metrics & cycle speed
               </p>
             </div>
             <Button
@@ -187,7 +187,7 @@ export function ProductionDashboard({ onNavigate }: { onNavigate: (page: string)
               onClick={() => onNavigate('machines')}
               className="text-sky-500 text-xs"
             >
-              Full Fleet Telemetry →
+              Full Fleet Status →
             </Button>
           </CardHeader>
           <CardContent className="space-y-4">

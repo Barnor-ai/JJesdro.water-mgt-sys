@@ -528,6 +528,63 @@ CREATE TABLE IF NOT EXISTS public.notifications (
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
+-- 24. PRODUCTION BUDGETS
+CREATE TABLE IF NOT EXISTS public.production_budgets (
+  id TEXT PRIMARY KEY DEFAULT ('pbdg-' || lower(replace(gen_random_uuid()::text, '-', ''))),
+  organization_id TEXT NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE DEFAULT 'org-default',
+  branch_id TEXT REFERENCES public.branches(id) ON DELETE SET NULL,
+  product_name TEXT NOT NULL,
+  bottle_size TEXT NOT NULL,
+  period TEXT NOT NULL,
+  period_type TEXT NOT NULL DEFAULT 'month',
+  budgeted_production_quantity NUMERIC(15,2) NOT NULL DEFAULT 0,
+  budgeted_raw_material_consumption NUMERIC(15,2) NOT NULL DEFAULT 0,
+  budgeted_labour_cost NUMERIC(15,2) NOT NULL DEFAULT 0,
+  budgeted_packaging_cost NUMERIC(15,2) NOT NULL DEFAULT 0,
+  budgeted_overhead NUMERIC(15,2) NOT NULL DEFAULT 0,
+  budgeted_production_cost NUMERIC(15,2) NOT NULL DEFAULT 0,
+  budgeted_sales_quantity NUMERIC(15,2) NOT NULL DEFAULT 0,
+  budgeted_revenue NUMERIC(15,2) NOT NULL DEFAULT 0,
+  notes TEXT,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_production_budgets_org ON public.production_budgets(organization_id);
+
+-- 25. CHART OF ACCOUNTS
+CREATE TABLE IF NOT EXISTS public.chart_of_accounts (
+  id TEXT PRIMARY KEY DEFAULT ('coa-' || lower(replace(gen_random_uuid()::text, '-', ''))),
+  organization_id TEXT NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE DEFAULT 'org-default',
+  code TEXT NOT NULL,
+  name TEXT NOT NULL,
+  category TEXT NOT NULL,
+  sub_category TEXT,
+  normal_balance TEXT NOT NULL DEFAULT 'Debit',
+  current_balance NUMERIC(15,2) NOT NULL DEFAULT 0,
+  is_system BOOLEAN DEFAULT false,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  CONSTRAINT uq_org_account_code UNIQUE (organization_id, code)
+);
+
+CREATE INDEX IF NOT EXISTS idx_chart_of_accounts_org ON public.chart_of_accounts(organization_id);
+
+-- 26. JOURNAL ENTRIES
+CREATE TABLE IF NOT EXISTS public.journal_entries (
+  id TEXT PRIMARY KEY DEFAULT ('je-' || lower(replace(gen_random_uuid()::text, '-', ''))),
+  organization_id TEXT NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE DEFAULT 'org-default',
+  entry_number TEXT NOT NULL,
+  date DATE NOT NULL,
+  reference TEXT,
+  description TEXT NOT NULL,
+  lines JSONB NOT NULL DEFAULT '[]'::jsonb,
+  total_amount NUMERIC(15,2) NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'Posted',
+  created_by TEXT,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_journal_entries_org ON public.journal_entries(organization_id);
+
 -- ==============================================================================
 -- SECURITY FUNCTIONS & ROW LEVEL SECURITY (RLS)
 -- ==============================================================================
@@ -578,7 +635,8 @@ DECLARE
     'production_batches', 'sales', 'purchases', 'expenses', 
     'warehouse_transactions', 'audit_logs', 'document_attachments', 
     'approval_workflows', 'subscriptions', 'billing_records', 
-    'invitations', 'notifications'
+    'invitations', 'notifications', 'production_budgets', 
+    'chart_of_accounts', 'journal_entries'
   ];
 BEGIN
   FOREACH tbl IN ARRAY tenant_tables LOOP

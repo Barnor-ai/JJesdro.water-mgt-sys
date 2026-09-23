@@ -82,7 +82,7 @@ export function DashboardOverview({ onNavigate }: { onNavigate: (page: string) =
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
           </h2>
           <p className="text-xs text-slate-400">
-            Real-time telemetry across bottling machinery, inventory levels, and commercial dispatches.
+            Real-time status across bottling machinery, inventory levels, and commercial dispatches.
           </p>
         </div>
 
@@ -302,7 +302,7 @@ export function DashboardOverview({ onNavigate }: { onNavigate: (page: string) =
         </div>
       </div>
 
-      {/* Bento Bottom Grid: Recent Production Batches (2 cols) + Machine Status & Telemetry (2 cols) */}
+      {/* Bento Bottom Grid: Recent Production Batches (2 cols) + Machine Status (2 cols) */}
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
         {/* Recent Production Batches */}
         <div className="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-xl p-4">
@@ -352,7 +352,7 @@ export function DashboardOverview({ onNavigate }: { onNavigate: (page: string) =
           </div>
         </div>
 
-        {/* Machine Status & Factory Load Telemetry Bento */}
+        {/* Machine Status & Factory Load Bento */}
         <div className="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-xl p-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <h4 className="text-xs font-semibold text-white mb-3">Bottling Machine Line</h4>

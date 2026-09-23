@@ -15,7 +15,14 @@ import { Button } from '../components/ui/Button';
 import { Select, Input } from '../components/ui/Input';
 import { Badge } from '../components/ui/Badge';
 import { formatCurrency, formatNumber, formatDate } from '../lib/utils';
-import { exportToExcel, exportToCSV, generateProductionReportPDF } from '../lib/exportUtils';
+import {
+  exportToExcel,
+  exportToCSV,
+  generateProductionReportPDF,
+  generateSalesAuditReportPDF,
+  generateExpenseReportPDF,
+  generateInventoryReportPDF,
+} from '../lib/exportUtils';
 
 export function ReportsPage() {
   const { productionBatches, sales, finishedGoods, expenses, bottleTypes, machines } = useERPStore();
@@ -24,12 +31,82 @@ export function ReportsPage() {
     'production' | 'sales' | 'inventory' | 'expenses' | 'waste'
   >('production');
   const [dateRange, setDateRange] = useState('This Month');
+  const [customStartDate, setCustomStartDate] = useState('');
+  const [customEndDate, setCustomEndDate] = useState('');
   const [selectedSize, setSelectedSize] = useState('all');
+
+  const isDateInRange = (dateString?: string) => {
+    if (!dateString) return true;
+    const d = new Date(dateString);
+    const now = new Date();
+
+    switch (dateRange) {
+      case 'Today':
+        return d.toDateString() === now.toDateString();
+      case 'This Week': {
+        const startOfWeek = new Date(now);
+        startOfWeek.setDate(now.getDate() - now.getDay());
+        startOfWeek.setHours(0, 0, 0, 0);
+        return d >= startOfWeek;
+      }
+      case 'This Month':
+        return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+      case 'This Quarter': {
+        const currentQ = Math.floor(now.getMonth() / 3);
+        const q = Math.floor(d.getMonth() / 3);
+        return currentQ === q && d.getFullYear() === now.getFullYear();
+      }
+      case 'This Year':
+        return d.getFullYear() === now.getFullYear();
+      case 'Previous Month': {
+        const prevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+        return d.getMonth() === prevMonth.getMonth() && d.getFullYear() === prevMonth.getFullYear();
+      }
+      case 'Previous Quarter': {
+        const prevQDate = new Date(now.getFullYear(), now.getMonth() - 3, 1);
+        const prevQ = Math.floor(prevQDate.getMonth() / 3);
+        return Math.floor(d.getMonth() / 3) === prevQ && d.getFullYear() === prevQDate.getFullYear();
+      }
+      case 'Previous Year':
+        return d.getFullYear() === now.getFullYear() - 1;
+      case 'Custom Date Range': {
+        if (!customStartDate && !customEndDate) return true;
+        const dTime = d.getTime();
+        if (customStartDate && dTime < new Date(customStartDate).getTime()) return false;
+        if (customEndDate && dTime > new Date(customEndDate).getTime() + 86400000) return false;
+        return true;
+      }
+      default:
+        return true;
+    }
+  };
+
+  const filteredProductionBatches = React.useMemo(() => {
+    return productionBatches.filter((b) => {
+      const matchSize = selectedSize === 'all' || b.bottle_size === selectedSize;
+      const matchDate = isDateInRange(b.production_date);
+      return matchSize && matchDate;
+    });
+  }, [productionBatches, selectedSize, dateRange, customStartDate, customEndDate]);
+
+  const filteredSales = React.useMemo(() => {
+    return sales.filter((s) => isDateInRange(s.sale_date));
+  }, [sales, dateRange, customStartDate, customEndDate]);
+
+  const filteredInventory = React.useMemo(() => {
+    return finishedGoods.filter((fg) => {
+      return selectedSize === 'all' || fg.bottle_size === selectedSize;
+    });
+  }, [finishedGoods, selectedSize]);
+
+  const filteredExpenses = React.useMemo(() => {
+    return expenses.filter((e) => isDateInRange(e.date));
+  }, [expenses, dateRange, customStartDate, customEndDate]);
 
   const handleExportExcel = () => {
     if (reportType === 'production') {
       exportToExcel(
-        productionBatches.map((b) => ({
+        filteredProductionBatches.map((b) => ({
           Batch: b.batch_number,
           Date: b.production_date,
           Shift: b.shift,
@@ -41,11 +118,11 @@ export function ReportsPage() {
           Efficiency: `${b.efficiency_percent}%`,
           Cost: b.production_cost,
         })),
-        'H2O_Production_Report'
+        'Production_Report'
       );
     } else if (reportType === 'sales') {
       exportToExcel(
-        sales.map((s) => ({
+        filteredSales.map((s) => ({
           Invoice: s.invoice_number,
           Customer: s.customer_name,
           Date: s.sale_date,
@@ -53,45 +130,55 @@ export function ReportsPage() {
           Paid: s.amount_paid,
           Status: s.payment_status,
         })),
-        'H2O_Sales_Report'
+        'Sales_Report'
       );
     } else if (reportType === 'inventory') {
       exportToExcel(
-        finishedGoods.map((fg) => ({
+        filteredInventory.map((fg) => ({
           Size: fg.bottle_size,
           Location: fg.location,
           CurrentStock: fg.current_stock,
           AvailableStock: fg.available_stock,
           MinThreshold: fg.min_stock,
         })),
-        'H2O_Inventory_Report'
+        'Inventory_Report'
       );
     } else {
       exportToExcel(
-        expenses.map((e) => ({
+        filteredExpenses.map((e) => ({
           Date: e.date,
           Category: e.category,
           Description: e.description,
           Payee: e.payee,
           Amount: e.amount,
         })),
-        'H2O_Expense_Report'
+        'Expense_Report'
       );
     }
   };
 
   const handleExportCSV = () => {
     if (reportType === 'production') {
-      exportToCSV(productionBatches, 'H2O_Production_Batches');
+      exportToCSV(filteredProductionBatches, 'Production_Batches');
     } else if (reportType === 'sales') {
-      exportToCSV(sales, 'H2O_Sales_Invoices');
+      exportToCSV(filteredSales, 'Sales_Invoices');
+    } else if (reportType === 'inventory') {
+      exportToCSV(filteredInventory, 'Inventory_Valuation');
     } else {
-      exportToCSV(expenses, 'H2O_Expenses');
+      exportToCSV(filteredExpenses, 'Expenses_Ledger');
     }
   };
 
   const handleExportPDF = () => {
-    generateProductionReportPDF(productionBatches, finishedGoods);
+    if (reportType === 'production' || reportType === 'waste') {
+      generateProductionReportPDF(filteredProductionBatches, filteredInventory);
+    } else if (reportType === 'sales') {
+      generateSalesAuditReportPDF(filteredSales);
+    } else if (reportType === 'inventory') {
+      generateInventoryReportPDF(filteredInventory);
+    } else {
+      generateExpenseReportPDF(filteredExpenses);
+    }
   };
 
   return (
@@ -135,17 +222,46 @@ export function ReportsPage() {
             <option value="waste">Defect & Scrap Waste Analysis</option>
           </Select>
 
-          <Select
-            label="Date Horizon"
-            value={dateRange}
-            onChange={(e) => setDateRange(e.target.value)}
-          >
-            <option value="Today">Today's Realtime Cycle</option>
-            <option value="This Week">Current Week</option>
-            <option value="This Month">Current Fiscal Month</option>
-            <option value="This Quarter">Current Quarter (Q3)</option>
-            <option value="Year to Date">Year to Date (YTD 2026)</option>
-          </Select>
+          <div className="space-y-1">
+            <Select
+              label="Date Horizon"
+              value={dateRange}
+              onChange={(e) => setDateRange(e.target.value)}
+            >
+              <option value="Today">Today</option>
+              <option value="This Week">This Week</option>
+              <option value="This Month">This Month</option>
+              <option value="This Quarter">This Quarter</option>
+              <option value="This Year">This Year</option>
+              <option value="Previous Month">Previous Month</option>
+              <option value="Previous Quarter">Previous Quarter</option>
+              <option value="Previous Year">Previous Year</option>
+              <option value="Custom Date Range">Custom Date Range</option>
+            </Select>
+
+            {dateRange === 'Custom Date Range' && (
+              <div className="grid grid-cols-2 gap-2 pt-2">
+                <div>
+                  <label className="block text-[10px] font-semibold text-slate-500 mb-0.5">Start Date</label>
+                  <input
+                    type="date"
+                    value={customStartDate}
+                    onChange={(e) => setCustomStartDate(e.target.value)}
+                    className="w-full px-2 py-1.5 rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-slate-100"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-semibold text-slate-500 mb-0.5">End Date</label>
+                  <input
+                    type="date"
+                    value={customEndDate}
+                    onChange={(e) => setCustomEndDate(e.target.value)}
+                    className="w-full px-2 py-1.5 rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-slate-100"
+                  />
+                </div>
+              </div>
+            )}
+          </div>
 
           <Select
             label="Filter Bottle Size SKU"
@@ -168,7 +284,7 @@ export function ReportsPage() {
           <div>
             <CardTitle>Generated Report Preview</CardTitle>
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              Ready for executive presentation and plant audit sign-off
+              Filtered horizon: <span className="font-semibold text-sky-600 dark:text-sky-400">{dateRange}</span> • Ready for executive sign-off
             </p>
           </div>
           <Badge variant="secondary">Validated</Badge>
@@ -191,7 +307,7 @@ export function ReportsPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                  {productionBatches.map((b) => (
+                  {filteredProductionBatches.map((b) => (
                     <tr key={b.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/40">
                       <td className="p-3 pl-5 font-bold text-sky-600 dark:text-sky-400">
                         {b.batch_number}
@@ -221,13 +337,13 @@ export function ReportsPage() {
                     <th className="p-3 pl-5">Invoice #</th>
                     <th className="p-3">Customer</th>
                     <th className="p-3">Date</th>
-                    <th className="p-3 text-right">Total ($)</th>
-                    <th className="p-3 text-right">Paid ($)</th>
+                    <th className="p-3 text-right">Total</th>
+                    <th className="p-3 text-right">Paid</th>
                     <th className="p-3 text-center pr-5">Status</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                  {sales.map((s) => (
+                  {filteredSales.map((s) => (
                     <tr key={s.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/40">
                       <td className="p-3 pl-5 font-bold text-sky-600 dark:text-sky-400">
                         {s.invoice_number}
@@ -262,7 +378,7 @@ export function ReportsPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                  {finishedGoods.map((fg) => (
+                  {filteredInventory.map((fg) => (
                     <tr key={fg.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/40">
                       <td className="p-3 pl-5 font-sans font-bold">{fg.bottle_size}</td>
                       <td className="p-3 font-sans text-slate-400">{fg.location}</td>
@@ -280,6 +396,77 @@ export function ReportsPage() {
                       </td>
                     </tr>
                   ))}
+                </tbody>
+              </table>
+            )}
+
+            {reportType === 'expenses' && (
+              <table className="w-full text-left text-xs font-mono">
+                <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-500 uppercase font-semibold font-sans">
+                  <tr>
+                    <th className="p-3 pl-5">Date</th>
+                    <th className="p-3">Category</th>
+                    <th className="p-3">Description</th>
+                    <th className="p-3">Payee</th>
+                    <th className="p-3 text-right pr-5">Amount</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {filteredExpenses.map((e) => (
+                    <tr key={e.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/40">
+                      <td className="p-3 pl-5 font-sans text-slate-400">{formatDate(e.date)}</td>
+                      <td className="p-3 font-sans font-semibold text-slate-700 dark:text-slate-200">
+                        {e.category}
+                      </td>
+                      <td className="p-3 font-sans text-slate-500">{e.description}</td>
+                      <td className="p-3 font-sans text-slate-500">{e.payee}</td>
+                      <td className="p-3 text-right pr-5 font-bold text-rose-500">
+                        {formatCurrency(e.amount)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+
+            {reportType === 'waste' && (
+              <table className="w-full text-left text-xs font-mono">
+                <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-500 uppercase font-semibold font-sans">
+                  <tr>
+                    <th className="p-3 pl-5">Batch #</th>
+                    <th className="p-3">SKU</th>
+                    <th className="p-3">Date</th>
+                    <th className="p-3 text-right">Defect Quantity</th>
+                    <th className="p-3 text-right">Scrap Rate</th>
+                    <th className="p-3 text-right pr-5">Estimated Waste Cost</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {filteredProductionBatches.map((b) => {
+                    const scrapRate =
+                      b.quantity_produced > 0
+                        ? ((b.rejected_quantity / b.quantity_produced) * 100).toFixed(2)
+                        : '0.00';
+                    const unitCost = b.production_cost / Math.max(1, b.quantity_produced);
+                    const wasteCost = b.rejected_quantity * unitCost;
+
+                    return (
+                      <tr key={b.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/40">
+                        <td className="p-3 pl-5 font-bold text-sky-600 dark:text-sky-400">
+                          {b.batch_number}
+                        </td>
+                        <td className="p-3 font-sans font-bold">{b.bottle_size}</td>
+                        <td className="p-3 font-sans text-slate-500">{formatDate(b.production_date)}</td>
+                        <td className="p-3 text-right text-rose-500 font-bold">
+                          {b.rejected_quantity.toLocaleString()}
+                        </td>
+                        <td className="p-3 text-right font-bold text-amber-500">{scrapRate}%</td>
+                        <td className="p-3 text-right pr-5 font-bold text-rose-600">
+                          {formatCurrency(wasteCost)}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             )}

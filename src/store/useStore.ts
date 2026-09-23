@@ -29,6 +29,11 @@ import {
   BillingRecord,
   Invitation,
   ApprovalWorkflow,
+  ProductionBudget,
+  ChartOfAccount,
+  JournalEntry,
+  SyncStatus,
+  SyncAction,
 } from '../types/database';
 import {
   initialBranches,
@@ -53,7 +58,16 @@ import {
   initialInvitations,
   initialBillingRecords,
   initialApprovalWorkflows,
+  initialProductionBudgets,
+  initialChartOfAccounts,
+  initialJournalEntries,
 } from './initialData';
+import {
+  saveTableToIndexedDB,
+  enqueueSyncTransaction,
+  processSyncQueue,
+  getPendingSyncCount,
+} from '../lib/offlineStorage';
 import {
   calculateCurrentInventory,
   calculateProductionEfficiency,
@@ -61,6 +75,14 @@ import {
   generateTransactionReference,
 } from '../lib/utils';
 import { authService, AuthUser } from '../lib/auth';
+import {
+  supabase,
+  isSupabaseConfigured,
+  getSupabaseConfigError,
+  formatSupabaseError,
+  checkSupabaseConnection,
+} from '../lib/supabase';
+import { supabaseDataService } from '../lib/supabaseDataService';
 
 const STORAGE_KEY_PREFIX = 'h2o_erp_v2_';
 
@@ -134,6 +156,52 @@ export function sanitizeBranch(b: any): Branch {
   };
 }
 
+export function sanitizeSupplier(s: any): Supplier {
+  if (!s || typeof s !== 'object') {
+    return {
+      id: `sup-${Date.now()}`,
+      name: 'General Supplier',
+      email: '',
+      phone: '',
+      address: '',
+      supplied_items: ['Preforms', 'Caps', 'Packaging'],
+      rating: 5,
+    };
+  }
+
+  let supplied_items: string[] = [];
+  if (Array.isArray(s.supplied_items) && s.supplied_items.length > 0) {
+    supplied_items = s.supplied_items;
+  } else if (typeof s.materials_supplied === 'string' && s.materials_supplied.trim()) {
+    supplied_items = s.materials_supplied
+      .split(',')
+      .map((it: string) => it.trim())
+      .filter(Boolean);
+  } else if (typeof s.supplied_items === 'string' && s.supplied_items.trim()) {
+    try {
+      const parsed = JSON.parse(s.supplied_items);
+      supplied_items = Array.isArray(parsed) ? parsed : [s.supplied_items];
+    } catch {
+      supplied_items = s.supplied_items
+        .split(',')
+        .map((it: string) => it.trim())
+        .filter(Boolean);
+    }
+  } else {
+    supplied_items = ['Preforms', 'Caps', 'Packaging'];
+  }
+
+  return {
+    ...s,
+    supplied_items,
+    rating: typeof s.rating === 'number' ? s.rating : 5,
+    contact_person: s.contact_person || s.contact || '',
+    phone: s.phone || '',
+    email: s.email || '',
+    address: s.address || '',
+  };
+}
+
 export interface ERPStoreState {
   // Auth & Profile
   isAuthenticated: boolean;
@@ -170,6 +238,18 @@ export interface ERPStoreState {
   expenses: Expense[];
   auditLogs: AuditLog[];
   notifications: AppNotification[];
+
+  // Financials & Production Budgeting
+  productionBudgets: ProductionBudget[];
+  chartOfAccounts: ChartOfAccount[];
+  journalEntries: JournalEntry[];
+  customExpenseCategories: string[];
+
+  // Offline-First Sync & Network State
+  isOnline: boolean;
+  syncStatus: SyncStatus;
+  pendingSyncCount: number;
+  lastSyncTimestamp: string | null;
 
   // System State & Connectivity
   isRealtimeConnected: boolean;
@@ -220,7 +300,7 @@ const globalState: ERPStoreState = {
   productionBatches: loadStored<ProductionBatch[]>('batches', initialProductionBatches),
   bottleTypes: loadStored<BottleType[]>('bottle_types', initialBottleTypes),
   rawMaterials: loadStored<RawMaterial[]>('raw_materials', initialRawMaterials),
-  suppliers: loadStored<Supplier[]>('suppliers', initialSuppliers),
+  suppliers: loadStored<Supplier[]>('suppliers', initialSuppliers).map(sanitizeSupplier),
   machines: loadStored<Machine[]>('machines', initialMachines),
   transactions: loadStored<WarehouseTransaction[]>('transactions', initialTransactions),
   customers: loadStored<Customer[]>('customers', initialCustomers),
@@ -230,12 +310,22 @@ const globalState: ERPStoreState = {
   auditLogs: loadStored<AuditLog[]>('audit_logs', initialAuditLogs),
   notifications: loadStored<AppNotification[]>('notifications', initialNotifications),
 
+  productionBudgets: loadStored<ProductionBudget[]>('budgets', initialProductionBudgets),
+  chartOfAccounts: loadStored<ChartOfAccount[]>('chart_of_accounts', initialChartOfAccounts),
+  journalEntries: loadStored<JournalEntry[]>('journal_entries', initialJournalEntries),
+  customExpenseCategories: loadStored<string[]>('custom_expense_categories', []),
+
+  isOnline: typeof navigator !== 'undefined' ? navigator.onLine : true,
+  syncStatus: 'synced',
+  pendingSyncCount: 0,
+  lastSyncTimestamp: new Date().toISOString(),
+
   isRealtimeConnected: true,
   supabaseConnected: true,
   isSyncingWithSupabase: false,
   supabaseLastSyncTime: 'Synchronized Locally',
   systemOnline: true,
-  storageEngine: 'Local Browser Storage (Standalone Engine)',
+  storageEngine: 'IndexedDB & Local Offline Storage Engine',
 };
 
 const listeners = new Set<(state: ERPStoreState) => void>();
@@ -269,12 +359,360 @@ export const addAuditLog = (
   notify();
 };
 
+// Real Supabase Synchronization Services (Singleton Module Level)
+export const syncToSupabase = async () => {
+  if (!isSupabaseConfigured) {
+    return {
+      success: false,
+      message: 'Supabase configuration is missing. Configure VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY in .env.',
+    };
+  }
+  globalState.isSyncingWithSupabase = true;
+  notify();
+
+  const orgId = globalState.currentOrganization.id;
+  try {
+    // 1. Organization
+    await supabaseDataService.upsertRecord('organizations', {
+      id: orgId,
+      name: globalState.currentOrganization.name,
+      currency: globalState.currentOrganization.currency,
+      country: globalState.currentOrganization.country,
+      status: globalState.currentOrganization.status || 'active',
+      plan_id: globalState.currentOrganization.plan_id || 'professional',
+    });
+
+    // 2. Production Batches
+    for (const b of globalState.productionBatches) {
+      await supabaseDataService.upsertRecord('production_batches', {
+        id: b.id,
+        organization_id: orgId,
+        batch_number: b.batch_number,
+        bottle_type_id: b.bottle_type_id,
+        target_quantity: b.quantity_produced,
+        actual_quantity: b.accepted_quantity ?? b.quantity_produced,
+        damaged_quantity: (b.damaged_bottles || 0) + (b.rejected_quantity || 0),
+        production_cost: b.production_cost,
+        unit_cost: b.cost_per_bottle ?? 0,
+        status: b.status,
+        date: b.production_date,
+        notes: b.notes,
+      });
+    }
+
+    // 3. Finished Goods
+    for (const fg of globalState.finishedGoods) {
+      await supabaseDataService.upsertRecord('inventory', {
+        id: fg.id,
+        organization_id: orgId,
+        bottle_type_id: fg.bottle_type_id,
+        name: `${fg.bottle_size} Bottled Water`,
+        size: fg.bottle_size,
+        quantity: fg.current_stock,
+        damaged_quantity: fg.damaged_stock || 0,
+        reorder_level: fg.min_stock,
+        unit_cost: 0,
+        selling_price: 0,
+        batch_code: fg.location,
+      });
+    }
+
+    // 4. Sales
+    for (const s of globalState.sales) {
+      await supabaseDataService.upsertRecord('sales', {
+        id: s.id,
+        organization_id: orgId,
+        invoice_number: s.invoice_number,
+        customer_id: s.customer_id,
+        sale_type: s.type,
+        payment_method: 'Cash',
+        payment_status: s.payment_status,
+        total_amount: s.total_amount,
+        paid_amount: s.amount_paid,
+        balance_due: Math.max(0, s.total_amount - s.amount_paid),
+        date: s.sale_date,
+        items: s.items,
+      });
+    }
+
+    // 5. Customers
+    for (const c of globalState.customers) {
+      await supabaseDataService.upsertRecord('customers', {
+        id: c.id,
+        organization_id: orgId,
+        name: c.name,
+        type: c.type,
+        phone: c.phone,
+        email: c.email,
+        address: c.address,
+        credit_limit: c.credit_limit,
+        outstanding_balance: c.outstanding_balance,
+      });
+    }
+
+    globalState.supabaseConnected = true;
+    globalState.isSyncingWithSupabase = false;
+    globalState.supabaseLastSyncTime = new Date().toLocaleTimeString();
+    notify();
+
+    return {
+      success: true,
+      message: 'Workspace data synchronized to Supabase successfully.',
+    };
+  } catch (err: any) {
+    globalState.isSyncingWithSupabase = false;
+    notify();
+    return { success: false, message: formatSupabaseError(err) };
+  }
+};
+
+export const syncFromSupabase = async () => {
+  if (!isSupabaseConfigured) {
+    return {
+      success: false,
+      message: 'Supabase configuration is missing. Configure VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY in .env.',
+    };
+  }
+
+  globalState.isSyncingWithSupabase = true;
+  notify();
+
+  try {
+    const orgId = globalState.currentOrganization.id;
+    const res = await supabaseDataService.fetchOrganizationData(orgId);
+
+    if (!res.success || !res.data) {
+      globalState.isSyncingWithSupabase = false;
+      notify();
+      return { success: false, message: res.error || 'Failed to fetch data from Supabase.' };
+    }
+
+    const d = res.data;
+    if (d.organization) {
+      globalState.currentOrganization = sanitizeOrganization(d.organization);
+      saveStored('current_org', globalState.currentOrganization);
+    }
+    if (d.branches.length > 0) {
+      globalState.branches = d.branches.map(sanitizeBranch);
+      saveStored('branches', globalState.branches);
+    }
+    if (d.bottleTypes.length > 0) {
+      globalState.bottleTypes = d.bottleTypes;
+      saveStored('bottle_types', globalState.bottleTypes);
+    }
+    if (d.rawMaterials.length > 0) {
+      globalState.rawMaterials = d.rawMaterials;
+      saveStored('raw_materials', globalState.rawMaterials);
+    }
+    if (d.suppliers.length > 0) {
+      globalState.suppliers = d.suppliers.map(sanitizeSupplier);
+      saveStored('suppliers', globalState.suppliers);
+    }
+    if (d.machines.length > 0) {
+      globalState.machines = d.machines;
+      saveStored('machines', globalState.machines);
+    }
+    if (d.finishedGoods.length > 0) {
+      globalState.finishedGoods = d.finishedGoods;
+      saveStored('inventory', globalState.finishedGoods);
+    }
+    if (d.productionBatches.length > 0) {
+      globalState.productionBatches = d.productionBatches;
+      saveStored('batches', globalState.productionBatches);
+    }
+    if (d.customers.length > 0) {
+      globalState.customers = d.customers;
+      saveStored('customers', globalState.customers);
+    }
+    if (d.purchases.length > 0) {
+      globalState.purchases = d.purchases;
+      saveStored('purchases', globalState.purchases);
+    }
+    if (d.sales.length > 0) {
+      globalState.sales = d.sales;
+      saveStored('sales', globalState.sales);
+    }
+    if (d.expenses.length > 0) {
+      globalState.expenses = d.expenses;
+      saveStored('expenses', globalState.expenses);
+    }
+    if (d.transactions.length > 0) {
+      globalState.transactions = d.transactions;
+      saveStored('transactions', globalState.transactions);
+    }
+    if (d.auditLogs.length > 0) {
+      globalState.auditLogs = d.auditLogs;
+      saveStored('audit_logs', globalState.auditLogs);
+    }
+    if (d.notifications.length > 0) {
+      globalState.notifications = d.notifications;
+      saveStored('notifications', globalState.notifications);
+    }
+    if (d.productionBudgets.length > 0) {
+      globalState.productionBudgets = d.productionBudgets;
+      saveStored('budgets', globalState.productionBudgets);
+    }
+    if (d.chartOfAccounts.length > 0) {
+      globalState.chartOfAccounts = d.chartOfAccounts;
+      saveStored('chart_of_accounts', globalState.chartOfAccounts);
+    }
+    if (d.journalEntries.length > 0) {
+      globalState.journalEntries = d.journalEntries;
+      saveStored('journal_entries', globalState.journalEntries);
+    }
+    if (d.approvalWorkflows.length > 0) {
+      globalState.approvalWorkflows = d.approvalWorkflows;
+      saveStored('approvals', globalState.approvalWorkflows);
+    }
+    if (d.billingRecords.length > 0) {
+      globalState.billingRecords = d.billingRecords;
+      saveStored('billing_records', globalState.billingRecords);
+    }
+    if (d.invitations.length > 0) {
+      globalState.invitations = d.invitations;
+      saveStored('invitations', globalState.invitations);
+    }
+    if (d.members.length > 0) {
+      globalState.organizationMembers = d.members;
+      saveStored('org_members', globalState.organizationMembers);
+    }
+
+    globalState.supabaseConnected = true;
+    globalState.isSyncingWithSupabase = false;
+    globalState.supabaseLastSyncTime = new Date().toLocaleTimeString();
+    notify();
+
+    return {
+      success: true,
+      message: `Synchronized ${
+        d.productionBatches.length + d.sales.length + d.finishedGoods.length
+      } records from Supabase!`,
+    };
+  } catch (err: any) {
+    globalState.isSyncingWithSupabase = false;
+    notify();
+    return { success: false, message: formatSupabaseError(err) };
+  }
+};
+
+let globalServicesInitialized = false;
+let currentRealtimeOrgId: string | null = null;
+let realtimeUnsubscribe: (() => void) | null = null;
+
+export const updateRealtimeSubscription = (orgId: string | undefined | null) => {
+  if (!isSupabaseConfigured || !orgId) {
+    if (realtimeUnsubscribe) {
+      realtimeUnsubscribe();
+      realtimeUnsubscribe = null;
+      currentRealtimeOrgId = null;
+    }
+    return;
+  }
+  if (currentRealtimeOrgId === orgId && realtimeUnsubscribe) {
+    return;
+  }
+  if (realtimeUnsubscribe) {
+    realtimeUnsubscribe();
+    realtimeUnsubscribe = null;
+  }
+  currentRealtimeOrgId = orgId;
+  realtimeUnsubscribe = supabaseDataService.subscribeToOrganization(
+    orgId,
+    (table, eventType) => {
+      console.log(`Supabase Realtime event: ${eventType} on ${table}`);
+      syncFromSupabase().catch((err) => console.warn('Realtime sync error:', err));
+    }
+  );
+};
+
+export const triggerSync = async () => {
+  if (!globalState.isOnline) return;
+  globalState.syncStatus = 'syncing';
+  notify();
+
+  try {
+    const result = await processSyncQueue();
+    globalState.pendingSyncCount = result.remainingCount;
+    globalState.lastSyncTimestamp = new Date().toISOString();
+    globalState.syncStatus = result.remainingCount === 0 ? 'synced' : 'pending';
+    globalState.supabaseLastSyncTime = 'Synchronized with local storage';
+  } catch {
+    globalState.syncStatus = 'error';
+  }
+  notify();
+};
+
+export const initGlobalServicesOnce = () => {
+  if (globalServicesInitialized) return;
+  globalServicesInitialized = true;
+
+  if (typeof window !== 'undefined') {
+    const handleOnline = () => {
+      globalState.isOnline = true;
+      notify();
+      triggerSync();
+    };
+    const handleOffline = () => {
+      globalState.isOnline = false;
+      notify();
+    };
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    getPendingSyncCount().then((count) => {
+      if (globalState.pendingSyncCount !== count) {
+        globalState.pendingSyncCount = count;
+        notify();
+      }
+    });
+
+    if (isSupabaseConfigured) {
+      checkSupabaseConnection().then((res) => {
+        globalState.supabaseConnected = res.connected;
+        if (res.connected) {
+          globalState.storageEngine = 'Supabase Cloud Database (PostgreSQL + RLS)';
+        }
+        notify();
+      });
+
+      authService.restoreSupabaseSession().then((user) => {
+        if (user && !globalState.isAuthenticated) {
+          const profile: UserProfile = {
+            id: user.id,
+            email: user.email,
+            full_name: user.full_name,
+            role: user.role,
+            branch_id: user.branch_id || 'branch-1',
+            is_active: true,
+            two_factor_enabled: false,
+            created_at: user.created_at,
+          };
+          globalState.currentUser = profile;
+          globalState.activeRole = profile.role;
+          globalState.isAuthenticated = true;
+          saveStored('user', profile);
+          saveStored('role', profile.role);
+          saveStored('is_authenticated', true);
+          notify();
+          syncFromSupabase().catch((err) => console.warn('Session sync error:', err));
+        }
+      });
+
+      if (globalState.currentOrganization?.id) {
+        updateRealtimeSubscription(globalState.currentOrganization.id);
+      }
+    }
+  }
+};
+
 export function useERPStore() {
   const [state, setState] = useState<ERPStoreState>(() => ({ ...globalState }));
 
   useEffect(() => {
+    initGlobalServicesOnce();
     const listener = (s: ERPStoreState) => setState(s);
     listeners.add(listener);
+
     return () => {
       listeners.delete(listener);
     };
@@ -341,6 +779,9 @@ export function useERPStore() {
 
       addAuditLog('LOGIN', 'auth.users', profile.id, { email });
       notify();
+      if (isSupabaseConfigured) {
+        syncFromSupabase().catch((err) => console.warn('Background sync on login notice:', err));
+      }
       return { success: true, user: profile };
     }
 
@@ -682,13 +1123,13 @@ export function useERPStore() {
 
   // Suppliers
   const addSupplier = (supplier: Omit<Supplier, 'id' | 'created_at' | 'organization_id' | 'branch_id'>) => {
-    const newSup: Supplier = {
+    const newSup: Supplier = sanitizeSupplier({
       ...supplier,
       id: `SUP-${Date.now()}`,
       organization_id: globalState.currentOrganization?.id || 'org-default',
       branch_id: globalState.currentBranchId,
       created_at: new Date().toISOString(),
-    };
+    });
     globalState.suppliers = [newSup, ...globalState.suppliers];
     saveStored('suppliers', globalState.suppliers);
     addAuditLog('CREATE', 'suppliers', newSup.id, { name: newSup.name });
@@ -696,17 +1137,87 @@ export function useERPStore() {
   };
 
   // Purchase Orders
-  const addPurchaseOrder = (po: Omit<Purchase, 'id' | 'created_at' | 'organization_id' | 'branch_id'>) => {
+  const addPurchaseOrder = (po: Omit<Purchase, 'id' | 'created_at' | 'organization_id'> & { branch_id?: string }) => {
+    const rawBranch = globalState.branches.find((b) => b.id === (po.branch_id || globalState.currentBranchId));
+    const branchName = rawBranch?.name || 'Main Plant';
+
+    // Ensure items calculate correct total with explicit unit cost
+    const items = (po.items || []).map((it, idx) => {
+      const quantity = Number(it.quantity || 0);
+      const unit_cost = Number(it.unit_cost || 0);
+      const discount = Number(it.discount || 0);
+      const tax = Number(it.tax || 0);
+      const total_cost = it.total_cost || Math.max(0, quantity * unit_cost - discount + tax);
+      return {
+        ...it,
+        id: it.id || `poi-${Date.now()}-${idx}`,
+        quantity,
+        unit_cost,
+        discount,
+        tax,
+        total_cost,
+      };
+    });
+
+    const subtotal = po.subtotal || items.reduce((acc, it) => acc + (it.quantity * it.unit_cost), 0);
+    const total_amount = po.total_amount || items.reduce((acc, it) => acc + it.total_cost, 0);
+
     const newPO: Purchase = {
       ...po,
       id: `PO-${new Date().getFullYear()}-${String(globalState.purchases.length + 1).padStart(4, '0')}`,
+      po_number: po.po_number || `PO-${new Date().getFullYear()}-${String(globalState.purchases.length + 1).padStart(4, '0')}`,
       organization_id: globalState.currentOrganization?.id || 'org-default',
-      branch_id: globalState.currentBranchId,
+      branch_id: po.branch_id || globalState.currentBranchId,
+      branch_name: branchName,
+      items,
+      subtotal,
+      total_amount,
+      status: po.status || 'Ordered',
+      created_by: po.created_by || globalState.currentUser?.full_name || 'Procurement Officer',
       created_at: new Date().toISOString(),
     };
+
     globalState.purchases = [newPO, ...globalState.purchases];
     saveStored('purchases', globalState.purchases);
-    addAuditLog('CREATE', 'purchases', newPO.id, { po_number: newPO.po_number });
+    saveTableToIndexedDB('purchases', globalState.purchases);
+
+    // Queue offline sync
+    enqueueSyncTransaction({
+      entity_type: 'purchase',
+      entity_id: newPO.id,
+      action: 'CREATE',
+      payload: newPO,
+    }).then(() => {
+      getPendingSyncCount().then((count) => {
+        globalState.pendingSyncCount = count;
+        notify();
+      });
+    });
+
+    addAuditLog('CREATE', 'purchases', newPO.id, {
+      po_number: newPO.po_number,
+      supplier_name: newPO.supplier_name,
+      total_amount: newPO.total_amount,
+    });
+    notify();
+  };
+
+  const updatePurchaseOrder = (id: string, updates: Partial<Purchase>) => {
+    const oldPO = globalState.purchases.find((p) => p.id === id);
+    globalState.purchases = globalState.purchases.map((p) =>
+      p.id === id ? { ...p, ...updates } : p
+    );
+    saveStored('purchases', globalState.purchases);
+    saveTableToIndexedDB('purchases', globalState.purchases);
+
+    enqueueSyncTransaction({
+      entity_type: 'purchase',
+      entity_id: id,
+      action: 'UPDATE',
+      payload: updates,
+    });
+
+    addAuditLog('UPDATE', 'purchases', id, { old_value: oldPO, new_value: updates });
     notify();
   };
 
@@ -723,35 +1234,416 @@ export function useERPStore() {
       received_date: new Date().toISOString(),
     };
 
+    // Flow user's explicit purchase cost directly into raw materials inventory and calculate weighted average cost
     po.items.forEach((item) => {
       const rmIndex = globalState.rawMaterials.findIndex((rm) => rm.id === item.raw_material_id);
       if (rmIndex !== -1) {
+        const rm = globalState.rawMaterials[rmIndex];
+        const oldStock = Number(rm.current_stock || 0);
+        const oldCost = Number(rm.cost_per_unit || 0);
+        const newQty = Number(item.quantity || 0);
+        const enteredUnitCost = Number(item.unit_cost || oldCost);
+
+        // Weighted Average Costing Formula: ((oldStock * oldCost) + (newQty * enteredUnitCost)) / (oldStock + newQty)
+        const totalStock = oldStock + newQty;
+        const weightedCost = totalStock > 0
+          ? ((oldStock * oldCost) + (newQty * enteredUnitCost)) / totalStock
+          : enteredUnitCost;
+
         globalState.rawMaterials[rmIndex] = {
-          ...globalState.rawMaterials[rmIndex],
-          current_stock: globalState.rawMaterials[rmIndex].current_stock + item.quantity,
+          ...rm,
+          current_stock: totalStock,
+          cost_per_unit: Number(weightedCost.toFixed(4)),
           last_restocked: new Date().toISOString(),
         };
       }
     });
 
     saveStored('purchases', globalState.purchases);
+    saveTableToIndexedDB('purchases', globalState.purchases);
     saveStored('raw_materials', globalState.rawMaterials);
-    addAuditLog('UPDATE', 'purchases', id, { status: 'Received' });
+    saveTableToIndexedDB('raw_materials', globalState.rawMaterials);
+
+    enqueueSyncTransaction({
+      entity_type: 'purchase',
+      entity_id: id,
+      action: 'UPDATE',
+      payload: { status: 'Received' },
+    });
+
+    addAuditLog('UPDATE', 'purchases', id, { status: 'Received', notes: 'Stock and weighted average cost updated' });
+    notify();
+  };
+
+  const voidPurchaseOrder = (id: string) => {
+    const po = globalState.purchases.find((p) => p.id === id);
+    if (!po) return;
+    globalState.purchases = globalState.purchases.map((p) =>
+      p.id === id ? { ...p, status: 'Cancelled' as PurchaseStatus } : p
+    );
+    saveStored('purchases', globalState.purchases);
+    saveTableToIndexedDB('purchases', globalState.purchases);
+
+    enqueueSyncTransaction({
+      entity_type: 'purchase',
+      entity_id: id,
+      action: 'VOID',
+      payload: { status: 'Cancelled' },
+    });
+
+    addAuditLog('VOID', 'purchases', id, { po_number: po.po_number, previous_status: po.status });
+    notify();
+  };
+
+  const deletePurchaseOrder = (id: string) => {
+    const po = globalState.purchases.find((p) => p.id === id);
+    globalState.purchases = globalState.purchases.filter((p) => p.id !== id);
+    saveStored('purchases', globalState.purchases);
+    saveTableToIndexedDB('purchases', globalState.purchases);
+
+    enqueueSyncTransaction({
+      entity_type: 'purchase',
+      entity_id: id,
+      action: 'DELETE',
+      payload: { id },
+    });
+
+    addAuditLog('DELETE', 'purchases', id, { deleted_record: po });
     notify();
   };
 
   // Expenses
-  const addExpense = (exp: Omit<Expense, 'id' | 'created_at' | 'organization_id' | 'branch_id'>) => {
+  const addExpense = (exp: Omit<Expense, 'id' | 'created_at' | 'organization_id'> & { branch_id?: string }) => {
+    const rawBranch = globalState.branches.find((b) => b.id === (exp.branch_id || globalState.currentBranchId));
+    const branchName = rawBranch?.name || 'Main Plant';
+
     const newExp: Expense = {
       ...exp,
       id: `EXP-${Date.now()}`,
+      expense_number: exp.expense_number || `EXP-${new Date().getFullYear()}-${String(globalState.expenses.length + 1).padStart(4, '0')}`,
       organization_id: globalState.currentOrganization?.id || 'org-default',
-      branch_id: globalState.currentBranchId,
+      branch_id: exp.branch_id || globalState.currentBranchId,
+      branch_name: branchName,
+      currency: exp.currency || globalState.currentOrganization?.currency || 'GHS',
+      date: exp.date || exp.expense_date || new Date().toISOString().split('T')[0],
+      expense_date: exp.expense_date || exp.date || new Date().toISOString().split('T')[0],
+      approval_status: exp.approval_status || 'Approved',
       created_at: new Date().toISOString(),
     };
     globalState.expenses = [newExp, ...globalState.expenses];
     saveStored('expenses', globalState.expenses);
-    addAuditLog('CREATE', 'expenses', newExp.id, { amount: newExp.amount, category: newExp.category });
+    saveTableToIndexedDB('expenses', globalState.expenses);
+
+    enqueueSyncTransaction({
+      entity_type: 'expense',
+      entity_id: newExp.id,
+      action: 'CREATE',
+      payload: newExp,
+    }).then(() => {
+      getPendingSyncCount().then((count) => {
+        globalState.pendingSyncCount = count;
+        notify();
+      });
+    });
+
+    addAuditLog('CREATE', 'expenses', newExp.id, {
+      expense_number: newExp.expense_number,
+      amount: newExp.amount,
+      category: newExp.category,
+      payee: newExp.payee,
+    });
+    notify();
+  };
+
+  const updateExpense = (id: string, updates: Partial<Expense>) => {
+    const oldExp = globalState.expenses.find((e) => e.id === id);
+    globalState.expenses = globalState.expenses.map((e) =>
+      e.id === id ? { ...e, ...updates } : e
+    );
+    saveStored('expenses', globalState.expenses);
+    saveTableToIndexedDB('expenses', globalState.expenses);
+
+    enqueueSyncTransaction({
+      entity_type: 'expense',
+      entity_id: id,
+      action: 'UPDATE',
+      payload: updates,
+    });
+
+    addAuditLog('UPDATE', 'expenses', id, { old_value: oldExp, new_value: updates });
+    notify();
+  };
+
+  const deleteExpense = (id: string) => {
+    const exp = globalState.expenses.find((e) => e.id === id);
+    globalState.expenses = globalState.expenses.filter((e) => e.id !== id);
+    saveStored('expenses', globalState.expenses);
+    saveTableToIndexedDB('expenses', globalState.expenses);
+
+    enqueueSyncTransaction({
+      entity_type: 'expense',
+      entity_id: id,
+      action: 'DELETE',
+      payload: { id },
+    });
+
+    addAuditLog('DELETE', 'expenses', id, { deleted_record: exp });
+    notify();
+  };
+
+  const addCustomExpenseCategory = (cat: string) => {
+    const trimmed = cat.trim();
+    if (!trimmed || globalState.customExpenseCategories.includes(trimmed)) return;
+    globalState.customExpenseCategories = [...globalState.customExpenseCategories, trimmed];
+    saveStored('custom_expense_categories', globalState.customExpenseCategories);
+    notify();
+  };
+
+  // Sales Void & Delete
+  const voidSale = (saleId: string) => {
+    const sale = globalState.sales.find((s) => s.id === saleId);
+    if (!sale) return;
+    globalState.sales = globalState.sales.map((s) =>
+      s.id === saleId ? { ...s, payment_status: 'Void' as any, notes: `${s.notes ? s.notes + ' - ' : ''}VOIDED` } : s
+    );
+    saveStored('sales', globalState.sales);
+    saveTableToIndexedDB('sales', globalState.sales);
+
+    enqueueSyncTransaction({
+      entity_type: 'sale',
+      entity_id: saleId,
+      action: 'VOID',
+      payload: { status: 'Void' },
+    });
+
+    addAuditLog('VOID', 'sales', saleId, { invoice_number: sale.invoice_number });
+    notify();
+  };
+
+  const deleteSale = (saleId: string) => {
+    const sale = globalState.sales.find((s) => s.id === saleId);
+    globalState.sales = globalState.sales.filter((s) => s.id !== saleId);
+    saveStored('sales', globalState.sales);
+    saveTableToIndexedDB('sales', globalState.sales);
+
+    enqueueSyncTransaction({
+      entity_type: 'sale',
+      entity_id: saleId,
+      action: 'DELETE',
+      payload: { id: saleId },
+    });
+
+    addAuditLog('DELETE', 'sales', saleId, { deleted_record: sale });
+    notify();
+  };
+
+  // Production Batches Delete
+  const deleteProductionBatch = (id: string) => {
+    const batch = globalState.productionBatches.find((b) => b.id === id);
+    globalState.productionBatches = globalState.productionBatches.filter((b) => b.id !== id);
+    saveStored('batches', globalState.productionBatches);
+    saveTableToIndexedDB('productionBatches', globalState.productionBatches);
+
+    enqueueSyncTransaction({
+      entity_type: 'production_batch',
+      entity_id: id,
+      action: 'DELETE',
+      payload: { id },
+    });
+
+    addAuditLog('DELETE', 'production_batches', id, { deleted_record: batch });
+    notify();
+  };
+
+  // Customer & Supplier Deletions
+  const deleteCustomer = (id: string) => {
+    const cust = globalState.customers.find((c) => c.id === id);
+    globalState.customers = globalState.customers.filter((c) => c.id !== id);
+    saveStored('customers', globalState.customers);
+    saveTableToIndexedDB('customers', globalState.customers);
+
+    enqueueSyncTransaction({
+      entity_type: 'customer',
+      entity_id: id,
+      action: 'DELETE',
+      payload: { id },
+    });
+
+    addAuditLog('DELETE', 'customers', id, { deleted_record: cust });
+    notify();
+  };
+
+  const deleteSupplier = (id: string) => {
+    const sup = globalState.suppliers.find((s) => s.id === id);
+    globalState.suppliers = globalState.suppliers.filter((s) => s.id !== id);
+    saveStored('suppliers', globalState.suppliers);
+    saveTableToIndexedDB('suppliers', globalState.suppliers);
+
+    enqueueSyncTransaction({
+      entity_type: 'supplier',
+      entity_id: id,
+      action: 'DELETE',
+      payload: { id },
+    });
+
+    addAuditLog('DELETE', 'suppliers', id, { deleted_record: sup });
+    notify();
+  };
+
+  const deleteMachine = (id: string) => {
+    const mach = globalState.machines.find((m) => m.id === id);
+    globalState.machines = globalState.machines.filter((m) => m.id !== id);
+    saveStored('machines', globalState.machines);
+    saveTableToIndexedDB('machines', globalState.machines);
+
+    enqueueSyncTransaction({
+      entity_type: 'machine',
+      entity_id: id,
+      action: 'DELETE',
+      payload: { id },
+    });
+
+    addAuditLog('DELETE', 'machines', id, { deleted_record: mach });
+    notify();
+  };
+
+  // Production Budgets
+  const addProductionBudget = (budget: Omit<ProductionBudget, 'id' | 'created_at'>) => {
+    const newBudget: ProductionBudget = {
+      ...budget,
+      id: `budget-${Date.now()}`,
+      organization_id: globalState.currentOrganization?.id || 'org-default',
+      branch_id: budget.branch_id || globalState.currentBranchId,
+      created_at: new Date().toISOString(),
+    };
+    globalState.productionBudgets = [newBudget, ...globalState.productionBudgets];
+    saveStored('budgets', globalState.productionBudgets);
+    saveTableToIndexedDB('productionBudgets', globalState.productionBudgets);
+
+    enqueueSyncTransaction({
+      entity_type: 'production_budget',
+      entity_id: newBudget.id,
+      action: 'CREATE',
+      payload: newBudget,
+    });
+
+    addAuditLog('CREATE', 'production_budgets', newBudget.id, {
+      product: newBudget.product_name,
+      period: newBudget.period,
+      budgeted_quantity: newBudget.budgeted_production_quantity,
+    });
+    notify();
+  };
+
+  const updateProductionBudget = (id: string, updates: Partial<ProductionBudget>) => {
+    globalState.productionBudgets = globalState.productionBudgets.map((b) =>
+      b.id === id ? { ...b, ...updates } : b
+    );
+    saveStored('budgets', globalState.productionBudgets);
+    saveTableToIndexedDB('productionBudgets', globalState.productionBudgets);
+
+    enqueueSyncTransaction({
+      entity_type: 'production_budget',
+      entity_id: id,
+      action: 'UPDATE',
+      payload: updates,
+    });
+
+    addAuditLog('UPDATE', 'production_budgets', id, updates);
+    notify();
+  };
+
+  const deleteProductionBudget = (id: string) => {
+    const b = globalState.productionBudgets.find((item) => item.id === id);
+    globalState.productionBudgets = globalState.productionBudgets.filter((item) => item.id !== id);
+    saveStored('budgets', globalState.productionBudgets);
+    saveTableToIndexedDB('productionBudgets', globalState.productionBudgets);
+
+    enqueueSyncTransaction({
+      entity_type: 'production_budget',
+      entity_id: id,
+      action: 'DELETE',
+      payload: { id },
+    });
+
+    addAuditLog('DELETE', 'production_budgets', id, { deleted_record: b });
+    notify();
+  };
+
+  // Journal Entries
+  const addJournalEntry = (entry: Omit<JournalEntry, 'id' | 'created_at'>) => {
+    const totalAmount = entry.lines.reduce((acc, l) => acc + (l.debit || 0), 0);
+    const newEntry: JournalEntry = {
+      ...entry,
+      id: `je-${Date.now()}`,
+      entry_number: entry.entry_number || `JE-${new Date().getFullYear()}-${String(globalState.journalEntries.length + 1).padStart(4, '0')}`,
+      organization_id: globalState.currentOrganization?.id || 'org-default',
+      total_amount: totalAmount,
+      created_by: entry.created_by || globalState.currentUser?.full_name || 'Accountant',
+      created_at: new Date().toISOString(),
+    };
+    globalState.journalEntries = [newEntry, ...globalState.journalEntries];
+    saveStored('journal_entries', globalState.journalEntries);
+    saveTableToIndexedDB('journalEntries', globalState.journalEntries);
+
+    enqueueSyncTransaction({
+      entity_type: 'journal_entry',
+      entity_id: newEntry.id,
+      action: 'CREATE',
+      payload: newEntry,
+    });
+
+    addAuditLog('CREATE', 'journal_entries', newEntry.id, {
+      entry_number: newEntry.entry_number,
+      total_amount: newEntry.total_amount,
+    });
+    notify();
+  };
+
+  const voidJournalEntry = (id: string) => {
+    const je = globalState.journalEntries.find((j) => j.id === id);
+    if (!je) return;
+    globalState.journalEntries = globalState.journalEntries.map((j) =>
+      j.id === id ? { ...j, status: 'Void' as any } : j
+    );
+    saveStored('journal_entries', globalState.journalEntries);
+    saveTableToIndexedDB('journalEntries', globalState.journalEntries);
+
+    enqueueSyncTransaction({
+      entity_type: 'journal_entry',
+      entity_id: id,
+      action: 'VOID',
+      payload: { status: 'Void' },
+    });
+
+    addAuditLog('VOID', 'journal_entries', id, { entry_number: je.entry_number });
+    notify();
+  };
+
+  // Offline-First Sync Controllers
+  const setIsOnline = (online: boolean) => {
+    globalState.isOnline = online;
+    if (online) {
+      triggerSync();
+    } else {
+      notify();
+    }
+  };
+
+  const queueOfflineTransaction = async (
+    entity_type: string,
+    entity_id: string,
+    action: SyncAction,
+    payload: any
+  ) => {
+    await enqueueSyncTransaction({
+      entity_type,
+      entity_id,
+      action,
+      payload,
+    });
+    const count = await getPendingSyncCount();
+    globalState.pendingSyncCount = count;
     notify();
   };
 
@@ -881,6 +1773,7 @@ export function useERPStore() {
     saveStored('subscription', sub);
 
     addAuditLog('WORKSPACE_SWITCH', 'organizations', organizationId, { name: target.name });
+    updateRealtimeSubscription(target.id);
     notify();
   };
 
@@ -1314,14 +2207,7 @@ export function useERPStore() {
   };
 
   const resetPasswordForEmail = async (email: string) => {
-    const exists = authService.verifyUserExists(email);
-    if (!exists) {
-      return { success: false, error: 'No account registered with this email address.' };
-    }
-    return {
-      success: true,
-      message: 'Account verified! You can now set your new password.',
-    };
+    return authService.resetPasswordForEmail(email);
   };
 
   const updateSupabasePassword = async (newPassword: string) => {
@@ -1337,15 +2223,6 @@ export function useERPStore() {
       notify();
     }
     return res;
-  };
-
-  // Local sync dummy hooks to keep Settings and any manual triggers operational
-  const syncToSupabase = async () => {
-    return { success: true, message: 'All local records are stored and persisted in browser storage.' };
-  };
-
-  const syncFromSupabase = async () => {
-    return { success: true, message: 'System online. All records loaded from local persistent store.' };
   };
 
   return {
@@ -1367,8 +2244,28 @@ export function useERPStore() {
     updateRawMaterialStock,
     addSupplier,
     addPurchaseOrder,
+    updatePurchaseOrder,
     receivePurchaseOrder,
+    voidPurchaseOrder,
+    deletePurchaseOrder,
     addExpense,
+    updateExpense,
+    deleteExpense,
+    addCustomExpenseCategory,
+    voidSale,
+    deleteSale,
+    deleteProductionBatch,
+    deleteCustomer,
+    deleteSupplier,
+    deleteMachine,
+    addProductionBudget,
+    updateProductionBudget,
+    deleteProductionBudget,
+    addJournalEntry,
+    voidJournalEntry,
+    setIsOnline,
+    triggerSync,
+    queueOfflineTransaction,
     updateMachineStatus,
     addAuditLog,
     addNotification,
@@ -1400,3 +2297,6 @@ export function useERPStore() {
     updateSupabasePassword,
   };
 }
+
+useERPStore.getState = (): ERPStoreState => ({ ...globalState });
+

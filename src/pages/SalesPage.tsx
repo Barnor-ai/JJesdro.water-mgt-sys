@@ -12,6 +12,7 @@ import {
   DollarSign,
   User,
   Sparkles,
+  Receipt,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { useERPStore } from '../store/useStore';
@@ -294,6 +295,15 @@ export function SalesPage() {
                             className="p-1.5 text-sky-600 dark:text-sky-400"
                           >
                             <FileText className="w-4 h-4" />
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => generateInvoicePDF(s, cust, 'Receipt')}
+                            title="Download Sales Receipt"
+                            className="p-1.5 text-emerald-600 dark:text-emerald-400"
+                          >
+                            <Receipt className="w-4 h-4" />
                           </Button>
                           <Button
                             size="sm"

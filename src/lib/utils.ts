@@ -1,12 +1,30 @@
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
+import { getCurrencySymbol } from './currency';
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-export function formatCurrency(amount: number, currency: string = '$'): string {
-  return `${currency}${Number(amount || 0).toLocaleString('en-US', {
+export function getActiveOrganizationCurrency(): string {
+  try {
+    const rawOrg =
+      localStorage.getItem('h2o_erp_v2_current_org') ||
+      localStorage.getItem('h2o_erp_v2_current_organization');
+    if (rawOrg) {
+      const parsed = JSON.parse(rawOrg);
+      if (parsed?.currency) {
+        return parsed.currency;
+      }
+    }
+  } catch {}
+  return 'GHS';
+}
+
+export function formatCurrency(amount: number, currencyOverride?: string): string {
+  const currencyCode = currencyOverride || getActiveOrganizationCurrency();
+  const symbol = getCurrencySymbol(currencyCode);
+  return `${symbol}${Number(amount || 0).toLocaleString('en-US', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`;

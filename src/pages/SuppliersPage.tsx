@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   Truck,
   Plus,
@@ -10,6 +10,8 @@ import {
   Clock,
   Layers,
   ArrowRight,
+  Trash2,
+  Filter,
 } from 'lucide-react';
 import { useERPStore } from '../store/useStore';
 import { Supplier, PurchaseOrder, PurchaseStatus } from '../types/database';
@@ -18,23 +20,38 @@ import { Button } from '../components/ui/Button';
 import { Input, Select } from '../components/ui/Input';
 import { Badge } from '../components/ui/Badge';
 import { Modal } from '../components/ui/Modal';
+import { ConfirmDialog } from '../components/ui/ConfirmDialog';
 import { formatCurrency, formatDate } from '../lib/utils';
-import { exportToExcel } from '../lib/exportUtils';
+import { exportToExcel, generatePurchaseOrderPDF } from '../lib/exportUtils';
 
 export function SuppliersPage() {
   const {
-    suppliers,
-    purchases,
-    rawMaterials,
+    suppliers = [],
+    purchases = [],
+    rawMaterials = [],
     currentUser,
     addSupplier,
+    deleteSupplier,
     addPurchaseOrder,
     receivePurchaseOrder,
+    deletePurchaseOrder,
   } = useERPStore();
 
   const [activeTab, setActiveTab] = useState<'pos' | 'suppliers' | 'raw'>('pos');
   const [isPOModalOpen, setIsPOModalOpen] = useState(false);
   const [isSupplierModalOpen, setIsSupplierModalOpen] = useState(false);
+
+  // Search state per tab
+  const [poSearch, setPOSearch] = useState('');
+  const [poStatusFilter, setPOStatusFilter] = useState('all');
+  const [poSupplierFilter, setPOSupplierFilter] = useState('all');
+  const [poDateFilter, setPODateFilter] = useState('all');
+  const [rawSearch, setRawSearch] = useState('');
+  const [supplierSearch, setSupplierSearch] = useState('');
+
+  // Delete Confirmation state
+  const [supplierToDelete, setSupplierToDelete] = useState<Supplier | null>(null);
+  const [poToDelete, setPOToDelete] = useState<PurchaseOrder | null>(null);
 
   // Supplier Form
   const [supName, setSupName] = useState('');
@@ -43,23 +60,54 @@ export function SuppliersPage() {
   const [supEmail, setSupEmail] = useState('');
   const [supAddress, setSupAddress] = useState('');
 
-  // PO Form
-  const [selectedSupplierId, setSelectedSupplierId] = useState(suppliers[0]?.id || 'sup-1');
-  const [selectedRawId, setSelectedRawId] = useState(rawMaterials[0]?.id || 'rm-1');
+  // PO Form - Explicit unit cost entry
+  const [selectedSupplierId, setSelectedSupplierId] = useState(suppliers?.[0]?.id || 'sup-1');
+  const [selectedRawId, setSelectedRawId] = useState(rawMaterials?.[0]?.id || 'rm-1');
   const [poQty, setPOQty] = useState<number>(20000);
+  const [unitCost, setUnitCost] = useState<number>(() => {
+    const raw = rawMaterials?.[0];
+    return raw?.cost_per_unit || 0.04;
+  });
   const [expectedDate, setExpectedDate] = useState(
     new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10)
   );
   const [poNotes, setPONotes] = useState('');
 
-  const selectedSupplier = suppliers.find((s) => s.id === selectedSupplierId);
-  const selectedRaw = rawMaterials.find((r) => r.id === selectedRawId);
-  const unitCost = selectedRaw?.cost_per_unit || 0.04;
-  const poTotal = poQty * unitCost;
+  const selectedSupplier = suppliers?.find((s) => s.id === selectedSupplierId);
+  const selectedRaw = rawMaterials?.find((r) => r.id === selectedRawId);
+
+  // Helper to extract items safely regardless of DB column schema differences
+  const getSupplierItems = (s: Supplier): string[] => {
+    if (Array.isArray(s?.supplied_items) && s.supplied_items.length > 0) {
+      return s.supplied_items;
+    }
+    const materials = (s as any)?.materials_supplied;
+    if (typeof materials === 'string' && materials.trim()) {
+      return materials
+        .split(',')
+        .map((it: string) => it.trim())
+        .filter(Boolean);
+    }
+    return ['Packaging', 'Preforms', 'Caps'];
+  };
+
+  // Update default unit cost when raw material selection changes
+  const handleRawChange = (rawId: string) => {
+    setSelectedRawId(rawId);
+    const found = rawMaterials?.find((r) => r.id === rawId);
+    if (found) {
+      setUnitCost(found.cost_per_unit || 0.04);
+    }
+  };
+
+  const poTotal = (Number(poQty) || 0) * (Number(unitCost) || 0);
 
   const handleCreatePO = (e: React.FormEvent) => {
     e.preventDefault();
     const poNumber = `PO-${Date.now().toString().slice(-6)}`;
+    const cost = Number(unitCost) || 0;
+    const qty = Number(poQty) || 0;
+    const total = qty * cost;
 
     addPurchaseOrder({
       po_number: poNumber,
@@ -68,9 +116,9 @@ export function SuppliersPage() {
       status: 'Ordered',
       order_date: new Date().toISOString().slice(0, 10),
       expected_delivery_date: expectedDate,
-      subtotal: poTotal,
+      subtotal: total,
       tax: 0,
-      total_amount: poTotal,
+      total_amount: total,
       notes: poNotes,
       items: [
         {
@@ -78,9 +126,9 @@ export function SuppliersPage() {
           purchase_id: `po-${Date.now()}`,
           raw_material_id: selectedRawId,
           raw_material_name: selectedRaw?.name || 'Raw Material',
-          quantity: Number(poQty),
-          unit_cost: unitCost,
-          total_cost: poTotal,
+          quantity: qty,
+          unit_cost: cost,
+          total_cost: total,
         },
       ],
       created_by: currentUser.full_name,
@@ -101,7 +149,124 @@ export function SuppliersPage() {
       rating: 5,
     });
     setIsSupplierModalOpen(false);
+    setSupName('');
+    setSupContact('');
+    setSupPhone('');
+    setSupEmail('');
+    setSupAddress('');
   };
+
+  const handleDeleteSupplierConfirm = () => {
+    if (supplierToDelete) {
+      deleteSupplier(supplierToDelete.id);
+      setSupplierToDelete(null);
+    }
+  };
+
+  const handleDeletePOConfirm = () => {
+    if (poToDelete) {
+      deletePurchaseOrder(poToDelete.id);
+      setPOToDelete(null);
+    }
+  };
+
+  // Filtered queries
+  const filteredPOs = useMemo(() => {
+    let list = purchases || [];
+
+    // 1. Text search
+    if (poSearch) {
+      const q = poSearch.toLowerCase();
+      list = list.filter(
+        (p) =>
+          p.po_number?.toLowerCase().includes(q) ||
+          p.supplier_name?.toLowerCase().includes(q) ||
+          p.status?.toLowerCase().includes(q) ||
+          p.notes?.toLowerCase().includes(q) ||
+          (p.items || []).some((it) => it.raw_material_name?.toLowerCase().includes(q))
+      );
+    }
+
+    // 2. Status filter
+    if (poStatusFilter !== 'all') {
+      list = list.filter((p) => p.status === poStatusFilter);
+    }
+
+    // 3. Supplier filter
+    if (poSupplierFilter !== 'all') {
+      list = list.filter((p) => p.supplier_id === poSupplierFilter);
+    }
+
+    // 4. Date filter
+    if (poDateFilter !== 'all') {
+      const now = new Date();
+      list = list.filter((p) => {
+        if (!p.order_date) return true;
+        const d = new Date(p.order_date);
+        switch (poDateFilter) {
+          case 'today':
+            return d.toDateString() === now.toDateString();
+          case 'this_week': {
+            const startOfWeek = new Date(now);
+            startOfWeek.setDate(now.getDate() - now.getDay());
+            startOfWeek.setHours(0, 0, 0, 0);
+            return d >= startOfWeek;
+          }
+          case 'this_month':
+            return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+          case 'this_quarter': {
+            const currentQ = Math.floor(now.getMonth() / 3);
+            const orderQ = Math.floor(d.getMonth() / 3);
+            return currentQ === orderQ && d.getFullYear() === now.getFullYear();
+          }
+          case 'this_year':
+            return d.getFullYear() === now.getFullYear();
+          case 'prev_month': {
+            const prevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+            return d.getMonth() === prevMonth.getMonth() && d.getFullYear() === prevMonth.getFullYear();
+          }
+          case 'prev_quarter': {
+            const prevQDate = new Date(now.getFullYear(), now.getMonth() - 3, 1);
+            const prevQ = Math.floor(prevQDate.getMonth() / 3);
+            return Math.floor(d.getMonth() / 3) === prevQ && d.getFullYear() === prevQDate.getFullYear();
+          }
+          case 'prev_year':
+            return d.getFullYear() === now.getFullYear() - 1;
+          default:
+            return true;
+        }
+      });
+    }
+
+    return list;
+  }, [purchases, poSearch, poStatusFilter, poSupplierFilter, poDateFilter]);
+
+  const filteredRaw = useMemo(() => {
+    const list = rawMaterials || [];
+    if (!rawSearch) return list;
+    const q = rawSearch.toLowerCase();
+    return list.filter(
+      (r) =>
+        r.name?.toLowerCase().includes(q) ||
+        r.category?.toLowerCase().includes(q)
+    );
+  }, [rawMaterials, rawSearch]);
+
+  const filteredSuppliers = useMemo(() => {
+    const list = suppliers || [];
+    if (!supplierSearch) return list;
+    const q = supplierSearch.toLowerCase();
+    return list.filter((s) => {
+      const items = getSupplierItems(s);
+      return (
+        s.name?.toLowerCase().includes(q) ||
+        s.contact_person?.toLowerCase().includes(q) ||
+        s.email?.toLowerCase().includes(q) ||
+        s.phone?.toLowerCase().includes(q) ||
+        items.some((it) => it.toLowerCase().includes(q))
+      );
+    });
+  }, [suppliers, supplierSearch]);
 
   return (
     <div className="space-y-6">
@@ -163,12 +328,100 @@ export function SuppliersPage() {
       {/* Tab 1: Purchase Orders Table */}
       {activeTab === 'pos' && (
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
-            <div>
-              <CardTitle>Purchase Orders (POs) & Inbound Shipments</CardTitle>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                Click "Receive Goods" on delivered POs to automatically replenish raw materials inventory
-              </p>
+          <CardHeader className="space-y-3 pb-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <CardTitle>Purchase Orders (POs) & Inbound Shipments</CardTitle>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Showing {filteredPOs.length} of {purchases.length} orders • Total:{' '}
+                  <span className="font-mono font-bold text-slate-900 dark:text-white">
+                    {formatCurrency(filteredPOs.reduce((acc, p) => acc + (p.total_amount || 0), 0))}
+                  </span>
+                </p>
+              </div>
+
+              {/* Quick Action Export */}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() =>
+                  exportToExcel(
+                    filteredPOs.map((p) => ({
+                      'PO Number': p.po_number,
+                      Supplier: p.supplier_name,
+                      'Order Date': p.order_date,
+                      'Expected Delivery': p.expected_delivery_date,
+                      'Total Cost': p.total_amount,
+                      Status: p.status,
+                      Notes: p.notes || '',
+                    })),
+                    'Purchase_Orders_Export'
+                  )
+                }
+              >
+                <Download className="w-3.5 h-3.5 mr-1.5" /> Export Excel
+              </Button>
+            </div>
+
+            {/* Filter Toolbar: Search, Status, Supplier, and Date Range */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="Search PO #, supplier, material..."
+                  value={poSearch}
+                  onChange={(e) => setPOSearch(e.target.value)}
+                  className="w-full pl-8 pr-3 py-1.5 rounded-lg bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:border-sky-500"
+                />
+              </div>
+
+              <div>
+                <select
+                  value={poStatusFilter}
+                  onChange={(e) => setPOStatusFilter(e.target.value)}
+                  className="w-full px-2.5 py-1.5 rounded-lg bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-sky-500"
+                >
+                  <option value="all">All Statuses</option>
+                  <option value="Ordered">Ordered</option>
+                  <option value="In Transit">In Transit</option>
+                  <option value="Received">Received</option>
+                  <option value="Cancelled">Cancelled</option>
+                </select>
+              </div>
+
+              <div>
+                <select
+                  value={poSupplierFilter}
+                  onChange={(e) => setPOSupplierFilter(e.target.value)}
+                  className="w-full px-2.5 py-1.5 rounded-lg bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-sky-500"
+                >
+                  <option value="all">All Suppliers</option>
+                  {(suppliers || []).map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <select
+                  value={poDateFilter}
+                  onChange={(e) => setPODateFilter(e.target.value)}
+                  className="w-full px-2.5 py-1.5 rounded-lg bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-sky-500"
+                >
+                  <option value="all">All Dates</option>
+                  <option value="today">Today</option>
+                  <option value="this_week">This Week</option>
+                  <option value="this_month">This Month</option>
+                  <option value="this_quarter">This Quarter</option>
+                  <option value="this_year">This Year</option>
+                  <option value="prev_month">Previous Month</option>
+                  <option value="prev_quarter">Previous Quarter</option>
+                  <option value="prev_year">Previous Year</option>
+                </select>
+              </div>
             </div>
           </CardHeader>
           <CardContent className="p-0">
@@ -186,7 +439,7 @@ export function SuppliersPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                  {purchases.map((po) => (
+                  {filteredPOs.map((po) => (
                     <tr
                       key={po.id}
                       className="hover:bg-slate-50/50 dark:hover:bg-slate-800/40 transition-colors"
@@ -217,20 +470,41 @@ export function SuppliersPage() {
                         </Badge>
                       </td>
                       <td className="p-3 text-right pr-5">
-                        {po.status === 'Ordered' ? (
-                          <Button
-                            size="sm"
-                            variant="primary"
-                            onClick={() => receivePurchaseOrder(po.id)}
-                            className="text-xs"
+                        <div className="flex items-center justify-end gap-2">
+                          {po.status === 'Ordered' ? (
+                            <Button
+                              size="sm"
+                              variant="primary"
+                              onClick={() => receivePurchaseOrder(po.id)}
+                              className="text-xs"
+                            >
+                              <CheckCircle2 className="w-3.5 h-3.5 mr-1" /> Receive & Stock In
+                            </Button>
+                          ) : (
+                            <span className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">
+                              ✓ Stocked in Warehouse
+                            </span>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const supp = suppliers.find((s) => s.id === po.supplier_id);
+                              generatePurchaseOrderPDF(po, supp);
+                            }}
+                            title="Download Purchase Order PDF"
+                            className="p-1.5 rounded text-slate-400 hover:text-sky-500 hover:bg-sky-500/10 transition-colors cursor-pointer"
                           >
-                            <CheckCircle2 className="w-3.5 h-3.5 mr-1" /> Receive & Stock In
-                          </Button>
-                        ) : (
-                          <span className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">
-                            ✓ Stocked in Warehouse
-                          </span>
-                        )}
+                            <Download className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setPOToDelete(po)}
+                            title="Delete Purchase Order"
+                            className="p-1 rounded text-slate-400 hover:text-rose-500 hover:bg-rose-500/10 transition-colors cursor-pointer"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -244,11 +518,23 @@ export function SuppliersPage() {
       {/* Tab 2: Raw Materials */}
       {activeTab === 'raw' && (
         <Card>
-          <CardHeader>
-            <CardTitle>Raw Materials Inventory Ledger</CardTitle>
-            <p className="text-xs text-slate-500 dark:text-slate-400">
-              Live stock levels of bottle preforms, caps, labels, shrink film, and purification chemicals
-            </p>
+          <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <CardTitle>Raw Materials Inventory Ledger</CardTitle>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Live stock levels of bottle preforms, caps, labels, shrink film, and purification chemicals
+              </p>
+            </div>
+            <div className="relative w-full sm:w-64">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
+              <input
+                type="text"
+                placeholder="Search materials by name or category..."
+                value={rawSearch}
+                onChange={(e) => setRawSearch(e.target.value)}
+                className="w-full pl-8 pr-3 py-1.5 rounded-lg bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:border-sky-500"
+              />
+            </div>
           </CardHeader>
           <CardContent className="p-0">
             <table className="w-full text-left text-xs">
@@ -263,27 +549,35 @@ export function SuppliersPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-mono">
-                {rawMaterials.map((rm) => (
-                  <tr
-                    key={rm.id}
-                    className="hover:bg-slate-50/50 dark:hover:bg-slate-800/40 transition-colors font-medium"
-                  >
-                    <td className="p-3.5 pl-5 font-sans font-bold text-slate-800 dark:text-slate-200">
-                      {rm.name}
-                    </td>
-                    <td className="p-3 font-sans text-slate-500">{rm.category}</td>
-                    <td className="p-3 text-right font-bold text-slate-900 dark:text-white">
-                      {rm.current_stock.toLocaleString()} {rm.unit}
-                    </td>
-                    <td className="p-3 text-right text-slate-400">
-                      {rm.reorder_level.toLocaleString()} {rm.unit}
-                    </td>
-                    <td className="p-3 text-right">{formatCurrency(rm.cost_per_unit)}</td>
-                    <td className="p-3 text-right pr-5 font-bold text-sky-600 dark:text-sky-400">
-                      {formatCurrency(rm.current_stock * rm.cost_per_unit)}
+                {filteredRaw.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="p-6 text-center text-xs text-slate-400 font-sans">
+                      No raw materials found.
                     </td>
                   </tr>
-                ))}
+                ) : (
+                  filteredRaw.map((rm) => (
+                    <tr
+                      key={rm.id}
+                      className="hover:bg-slate-50/50 dark:hover:bg-slate-800/40 transition-colors font-medium"
+                    >
+                      <td className="p-3.5 pl-5 font-sans font-bold text-slate-800 dark:text-slate-200">
+                        {rm.name}
+                      </td>
+                      <td className="p-3 font-sans text-slate-500">{rm.category}</td>
+                      <td className="p-3 text-right font-bold text-slate-900 dark:text-white">
+                        {rm.current_stock.toLocaleString()} {rm.unit}
+                      </td>
+                      <td className="p-3 text-right text-slate-400">
+                        {rm.reorder_level.toLocaleString()} {rm.unit}
+                      </td>
+                      <td className="p-3 text-right">{formatCurrency(rm.cost_per_unit)}</td>
+                      <td className="p-3 text-right pr-5 font-bold text-sky-600 dark:text-sky-400">
+                        {formatCurrency(rm.current_stock * rm.cost_per_unit)}
+                      </td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </CardContent>
@@ -292,42 +586,93 @@ export function SuppliersPage() {
 
       {/* Tab 3: Suppliers Directory */}
       {activeTab === 'suppliers' && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {suppliers.map((s) => (
-            <Card key={s.id}>
-              <CardContent className="p-5 space-y-3">
-                <div className="flex items-center justify-between">
-                  <h3 className="font-bold text-base text-slate-900 dark:text-white">{s.name}</h3>
-                  <Badge variant="secondary">⭐️ {s.rating}.0 Supplier</Badge>
-                </div>
-                <p className="text-xs text-slate-500">Contact: {s.contact_person}</p>
-                <div className="text-xs text-slate-400 space-y-1">
-                  <p>📞 {s.phone}</p>
-                  <p>✉️ {s.email}</p>
-                  <p>📍 {s.address}</p>
-                </div>
-                <div className="flex flex-wrap gap-1.5 pt-2">
-                  {s.supplied_items.map((item, idx) => (
-                    <span
-                      key={idx}
-                      className="px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-[10px] text-slate-600 dark:text-slate-300 font-semibold"
-                    >
-                      {item}
-                    </span>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-          ))}
+        <div className="space-y-4">
+          <div className="relative max-w-sm">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+            <input
+              type="text"
+              placeholder="Search suppliers by name, contact, item..."
+              value={supplierSearch}
+              onChange={(e) => setSupplierSearch(e.target.value)}
+              className="w-full pl-9 pr-4 py-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:border-sky-500 shadow-xs"
+            />
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {filteredSuppliers.length === 0 ? (
+              <div className="col-span-2 p-8 text-center text-xs text-slate-400 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700">
+                No suppliers matching search.
+              </div>
+            ) : (
+              filteredSuppliers.map((s) => (
+                <Card key={s.id}>
+                  <CardContent className="p-5 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h3 className="font-bold text-base text-slate-900 dark:text-white">{s.name}</h3>
+                      <div className="flex items-center gap-2">
+                        <Badge variant="secondary">⭐️ {s.rating}.0</Badge>
+                        <button
+                          type="button"
+                          onClick={() => setSupplierToDelete(s)}
+                          title="Delete Supplier"
+                          className="p-1 rounded text-slate-400 hover:text-rose-500 hover:bg-rose-500/10 transition-colors cursor-pointer"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                    <p className="text-xs text-slate-500">Contact: {s.contact_person}</p>
+                    <div className="text-xs text-slate-400 space-y-1">
+                      <p>📞 {s.phone}</p>
+                      <p>✉️ {s.email}</p>
+                      <p>📍 {s.address}</p>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5 pt-2">
+                      {getSupplierItems(s).map((item, idx) => (
+                        <span
+                          key={idx}
+                          className="px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-[10px] text-slate-600 dark:text-slate-300 font-semibold"
+                        >
+                          {item}
+                        </span>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              ))
+            )}
+          </div>
         </div>
       )}
+
+      {/* Delete Supplier Confirmation */}
+      <ConfirmDialog
+        isOpen={Boolean(supplierToDelete)}
+        onClose={() => setSupplierToDelete(null)}
+        onConfirm={handleDeleteSupplierConfirm}
+        title="Delete Supplier"
+        message={`Are you sure you want to delete supplier "${supplierToDelete?.name}"? Any past purchase orders referencing this supplier will remain in history.`}
+        confirmText="Delete Supplier"
+        variant="danger"
+      />
+
+      {/* Delete Purchase Order Confirmation */}
+      <ConfirmDialog
+        isOpen={Boolean(poToDelete)}
+        onClose={() => setPOToDelete(null)}
+        onConfirm={handleDeletePOConfirm}
+        title="Delete Purchase Order"
+        message={`Are you sure you want to delete purchase order ${poToDelete?.po_number} (${formatCurrency(poToDelete?.total_amount || 0)})?`}
+        confirmText="Delete PO"
+        variant="danger"
+      />
 
       {/* Create PO Modal */}
       <Modal
         isOpen={isPOModalOpen}
         onClose={() => setIsPOModalOpen(false)}
         title="Create Supply Chain Purchase Order"
-        description="Generates an authorized PO for raw materials delivery"
+        description="Generates an authorized PO for raw materials delivery with explicit cost pricing"
         maxWidth="lg"
       >
         <form onSubmit={handleCreatePO} className="space-y-4">
@@ -336,34 +681,50 @@ export function SuppliersPage() {
             value={selectedSupplierId}
             onChange={(e) => setSelectedSupplierId(e.target.value)}
           >
-            {suppliers.map((s) => (
+            {(suppliers || []).map((s) => (
               <option key={s.id} value={s.id}>
                 {s.name}
               </option>
             ))}
           </Select>
 
-          <div className="grid grid-cols-2 gap-4">
-            <Select
-              label="Raw Material Item"
-              value={selectedRawId}
-              onChange={(e) => setSelectedRawId(e.target.value)}
-            >
-              {rawMaterials.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.name} (${r.cost_per_unit}/{r.unit})
-                </option>
-              ))}
-            </Select>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="sm:col-span-1">
+              <Select
+                label="Raw Material Item"
+                value={selectedRawId}
+                onChange={(e) => handleRawChange(e.target.value)}
+              >
+                {(rawMaterials || []).map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.name}
+                  </option>
+                ))}
+              </Select>
+            </div>
 
-            <Input
-              label="Quantity to Order"
-              type="number"
-              min="1"
-              value={poQty}
-              onChange={(e) => setPOQty(Number(e.target.value))}
-              required
-            />
+            <div className="sm:col-span-1">
+              <Input
+                label={`Quantity (${selectedRaw?.unit || 'Units'})`}
+                type="number"
+                min="1"
+                value={poQty}
+                onChange={(e) => setPOQty(Number(e.target.value))}
+                required
+              />
+            </div>
+
+            <div className="sm:col-span-1">
+              <Input
+                label="Unit Cost Price"
+                type="number"
+                step="0.0001"
+                min="0"
+                value={unitCost}
+                onChange={(e) => setUnitCost(Number(e.target.value))}
+                required
+              />
+            </div>
           </div>
 
           <Input
@@ -383,7 +744,7 @@ export function SuppliersPage() {
 
           <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex justify-between items-center text-xs">
             <span className="font-semibold text-slate-600 dark:text-slate-400">
-              Estimated Total Cost:
+              Total Order Cost ({poQty.toLocaleString()} × {formatCurrency(unitCost)}):
             </span>
             <span className="text-base font-bold text-sky-600 dark:text-sky-400 font-mono">
               {formatCurrency(poTotal)}

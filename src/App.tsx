@@ -23,7 +23,6 @@ import { AuditLogsPage } from './pages/AuditLogsPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { BillingPage } from './pages/BillingPage';
 import { ApprovalsPage } from './pages/ApprovalsPage';
-import { SuperAdminPage } from './pages/SuperAdminPage';
 import { UpdatePasswordPage } from './pages/UpdatePasswordPage';
 import { UpgradeModal } from './components/saas/UpgradeModal';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
@@ -42,6 +41,7 @@ function AppRoutes() {
         <Route path="/dashboard" element={<DashboardOverview onNavigate={handleNavigate} />} />
         <Route path="/login" element={<Navigate to="/dashboard" replace />} />
         <Route path="/revenue-dash" element={<RevenueDashboard />} />
+        <Route path="/financials" element={<FinancialDashboard />} />
         <Route path="/financial-dash" element={<FinancialDashboard />} />
         <Route path="/production-dash" element={<ProductionDashboard onNavigate={handleNavigate} />} />
         <Route
@@ -61,7 +61,6 @@ function AppRoutes() {
         <Route path="/users" element={<UsersPage />} />
         <Route path="/approvals" element={<ApprovalsPage />} />
         <Route path="/billing" element={<BillingPage />} />
-        <Route path="/super-admin" element={<SuperAdminPage />} />
         <Route path="/audit-logs" element={<AuditLogsPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />

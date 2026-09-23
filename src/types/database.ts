@@ -47,6 +47,7 @@ export interface Organization {
   logo_url?: string;
   currency: 'GHS' | 'USD' | 'EUR' | 'GBP' | string;
   financial_year_start?: string;
+  fiscal_year_end?: string;
   timezone: string;
   plan_id: SubscriptionPlanId;
   status: 'active' | 'trial' | 'suspended' | 'canceled';
@@ -190,11 +191,41 @@ export type MachineStatus = 'Operational' | 'Maintenance' | 'Offline' | 'Degrade
 export type PurchaseStatus = 'Draft' | 'Ordered' | 'Received' | 'Cancelled';
 
 export type ExpenseCategory =
+  | 'Salaries & Wages'
+  | 'Rent'
+  | 'Electricity'
+  | 'Water'
+  | 'Fuel'
+  | 'Transport'
+  | 'Repairs & Maintenance'
+  | 'Machinery Maintenance'
+  | 'Packaging'
+  | 'Raw Materials'
+  | 'Office Supplies'
+  | 'Communication'
+  | 'Internet'
+  | 'Insurance'
+  | 'Bank Charges'
+  | 'Professional Fees'
+  | 'Legal Fees'
+  | 'Accounting Fees'
+  | 'Advertising'
+  | 'Marketing'
+  | 'Security'
+  | 'Cleaning'
+  | 'Travel'
+  | 'Accommodation'
+  | 'Training'
+  | 'Taxes & Levies'
+  | 'Licenses'
+  | 'Depreciation'
+  | 'Utilities'
+  | 'Other Operating Expenses'
+  // Legacy / convenience categories
   | 'Electricity & Power'
   | 'Diesel & Fuel'
   | 'Machine Maintenance'
   | 'Water Treatment & Chemicals'
-  | 'Salaries & Wages'
   | 'Packaging Supplies'
   | 'Logistics & Transport'
   | 'Rent & Utilities'
@@ -386,6 +417,8 @@ export interface PurchaseItem {
   raw_material_name?: string;
   quantity: number;
   unit_cost: number;
+  discount?: number;
+  tax?: number;
   total_cost: number;
 }
 
@@ -393,14 +426,20 @@ export interface Purchase {
   id: string;
   organization_id?: string;
   branch_id?: string;
+  branch_name?: string;
+  warehouse_id?: string;
+  warehouse_name?: string;
   po_number: string;
+  reference_number?: string;
   supplier_id: string;
   supplier_name?: string;
   status: PurchaseStatus;
+  payment_status?: PaymentStatus;
   order_date: string;
   expected_delivery_date: string;
   received_date?: string;
   subtotal: number;
+  discount?: number;
   tax: number;
   total_amount: number;
   notes?: string;
@@ -470,17 +509,115 @@ export interface Expense {
   id: string;
   organization_id?: string;
   branch_id?: string;
+  branch_name?: string;
   expense_number?: string;
   category: ExpenseCategory | string;
   amount: number;
+  currency?: string;
   date?: string;
   expense_date?: string;
   payment_method: string;
   payee: string;
   description: string;
+  payment_account?: string;
+  department?: string;
+  reference_number?: string;
   receipt_number?: string;
+  tax_amount?: number;
+  notes?: string;
+  attachment_url?: string;
   recorded_by: string;
+  approval_status?: 'Draft' | 'Pending' | 'Approved' | 'Rejected' | 'Void';
   created_at?: string;
+}
+
+export interface ProductionBudget {
+  id: string;
+  organization_id?: string;
+  branch_id?: string;
+  product_name: string;
+  bottle_size: BottleSize;
+  period: string; // e.g., '2026-09' or '2026-Q3' or '2026'
+  period_type: 'month' | 'quarter' | 'year';
+  budgeted_production_quantity: number;
+  expected_selling_price?: number;
+  material_cost?: number;
+  budgeted_raw_material_consumption: number;
+  budgeted_labour_cost: number;
+  budgeted_packaging_cost: number;
+  budgeted_overhead: number;
+  budgeted_production_cost: number;
+  budgeted_sales_quantity: number;
+  budgeted_revenue: number;
+  notes?: string;
+  created_at?: string;
+}
+
+export interface ChartOfAccount {
+  id: string;
+  code: string;
+  name: string;
+  category: 'Asset' | 'Liability' | 'Equity' | 'Revenue' | 'Cost of Sales' | 'Operating Expense';
+  sub_category?: string;
+  normal_balance: 'Debit' | 'Credit';
+  current_balance: number;
+  is_system?: boolean;
+}
+
+export interface JournalEntryLine {
+  account_code: string;
+  account_name: string;
+  debit: number;
+  credit: number;
+  description?: string;
+}
+
+export interface JournalEntry {
+  id: string;
+  organization_id?: string;
+  entry_number: string;
+  date: string;
+  reference?: string;
+  description: string;
+  lines: JournalEntryLine[];
+  total_amount: number;
+  status: 'Posted' | 'Draft' | 'Void';
+  created_by: string;
+  created_at: string;
+}
+
+export type SyncStatus = 'pending' | 'syncing' | 'synced' | 'failed' | 'conflict' | 'error';
+export type SyncAction = 'CREATE' | 'UPDATE' | 'DELETE' | 'VOID';
+
+export interface SyncQueueItem {
+  id: string; // local ID
+  local_id?: string;
+  record_id?: string;
+  organization_id?: string;
+  user_id?: string;
+  operation_type: SyncAction;
+  action?: SyncAction;
+  entity_type: string; // table/entity
+  table_name?: string;
+  entity_id: string;
+  payload: any;
+  timestamp: string;
+  status: SyncStatus;
+  retry_count: number;
+  error_message?: string;
+  synced_at?: string;
+}
+
+export interface DataConflict {
+  id: string;
+  entity_type: string;
+  entity_id: string;
+  local_timestamp: string;
+  remote_timestamp: string;
+  local_data: any;
+  remote_data: any;
+  resolution: 'preserved_local' | 'resolved' | 'pending_review';
+  detected_at: string;
 }
 
 export interface AuditLog {

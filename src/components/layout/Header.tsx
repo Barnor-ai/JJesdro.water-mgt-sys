@@ -29,6 +29,8 @@ import { Badge } from '../ui/Badge';
 import { formatDateTime } from '../../lib/utils';
 import { useNavigate } from 'react-router-dom';
 import { SupabaseStatusModal } from '../supabase/SupabaseStatusModal';
+import { OfflineSyncModal } from '../common/OfflineSyncModal';
+import { Wifi, WifiOff, RefreshCw } from 'lucide-react';
 
 interface HeaderProps {
   onToggleSidebar?: () => void;
@@ -62,12 +64,17 @@ export function Header({
     currentOrganization,
     updateCurrentUserProfile,
     updateSupabasePassword,
+    isOnline,
+    syncStatus,
+    pendingSyncCount,
+    triggerSync,
   } = useERPStore();
 
   const [isNotifOpen, setIsNotifOpen] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false);
   const [isSupabaseModalOpen, setIsSupabaseModalOpen] = useState(false);
+  const [isOfflineModalOpen, setIsOfflineModalOpen] = useState(false);
 
   // Password modal state
   const [newPassword, setNewPassword] = useState('');
@@ -220,7 +227,7 @@ export function Header({
           )}
           <div className="flex flex-col min-w-0">
             <span className="font-bold text-xs sm:text-sm text-slate-900 dark:text-white truncate leading-tight tracking-tight">
-              {currentOrganization?.name || 'H2O Pure Bottled Water Corp.'}
+              {currentOrganization?.name?.trim() || 'Company Name'}
             </span>
             <span className="text-[9px] sm:text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-1 leading-none mt-0.5">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse shrink-0" />
@@ -247,19 +254,61 @@ export function Header({
 
       {/* Right Section: System Online, Dark/Light Mode, Notifications, and Far Top Right User Profile Dropdown */}
       <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
-        {/* System Online Status Badge */}
+        {/* Offline / Online System Status Badge */}
         <button
           type="button"
-          onClick={() => setIsSupabaseModalOpen(true)}
-          title="System Online - Local Engine Active"
-          className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer border border-slate-200 dark:border-slate-800 bg-slate-100/80 dark:bg-slate-900 shadow-xs"
-          aria-label="System status"
+          onClick={() => setIsOfflineModalOpen(true)}
+          title={
+            !isOnline
+              ? 'Offline mode — changes will sync when connection is restored.'
+              : syncStatus === 'syncing'
+              ? 'Syncing changes with server...'
+              : syncStatus === 'failed' || syncStatus === 'error'
+              ? 'Sync failed — click to retry'
+              : pendingSyncCount > 0
+              ? `${pendingSyncCount} changes pending sync`
+              : 'All changes synced.'
+          }
+          className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer border shadow-xs ${
+            !isOnline
+              ? 'bg-amber-500/10 border-amber-500/30 text-amber-700 dark:text-amber-300 hover:bg-amber-500/20'
+              : syncStatus === 'failed' || syncStatus === 'error'
+              ? 'bg-rose-500/10 border-rose-500/30 text-rose-700 dark:text-rose-300 hover:bg-rose-500/20'
+              : 'bg-slate-100/80 dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+          }`}
+          aria-label="System sync status"
         >
-          <Database className="w-3.5 h-3.5 text-blue-500 shrink-0" />
-          <span className="font-mono text-[11px] font-semibold text-slate-800 dark:text-slate-200">
-            Online
+          {!isOnline ? (
+            <WifiOff className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+          ) : syncStatus === 'syncing' ? (
+            <RefreshCw className="w-3.5 h-3.5 text-blue-500 animate-spin shrink-0" />
+          ) : (
+            <Wifi className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+          )}
+
+          <span className="font-mono text-[11px] font-semibold">
+            {!isOnline
+              ? 'Offline'
+              : syncStatus === 'syncing'
+              ? 'Syncing...'
+              : syncStatus === 'failed' || syncStatus === 'error'
+              ? 'Sync failed'
+              : pendingSyncCount > 0
+              ? `Syncing (${pendingSyncCount})`
+              : 'Synced'}
           </span>
-          <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
+
+          <span
+            className={`w-2 h-2 rounded-full shrink-0 ${
+              !isOnline
+                ? 'bg-amber-500'
+                : syncStatus === 'syncing'
+                ? 'bg-blue-500 animate-pulse'
+                : syncStatus === 'failed' || syncStatus === 'error'
+                ? 'bg-rose-500'
+                : 'bg-emerald-500'
+            }`}
+          />
         </button>
 
         {/* Dark / Light Mode Switcher */}
@@ -659,6 +708,13 @@ export function Header({
           </div>
         </div>
       )}
+
+      {/* Offline Sync and Queue Modal */}
+      <OfflineSyncModal
+        isOpen={isOfflineModalOpen}
+        onClose={() => setIsOfflineModalOpen(false)}
+        isOnline={isOnline}
+      />
 
       {/* Supabase Status and Management Modal */}
       <SupabaseStatusModal

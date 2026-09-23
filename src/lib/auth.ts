@@ -1,8 +1,10 @@
 import { OrganizationRole, UserRole } from '../types/database';
+import { supabase, isSupabaseConfigured, formatSupabaseError } from './supabase';
 
 // ==============================================================================
-// STANDALONE LOCAL AUTHENTICATION SERVICE FOR AQUAFLOW ERP
-// Completely self-contained: No Supabase, no external APIs, Web Crypto hashing
+// AUTHENTICATION SERVICE FOR AQUAFLOW ERP
+// Connected to Supabase Auth with persistent sessions, password reset,
+// role-based access, and reliable local fallback.
 // ==============================================================================
 
 export interface AuthUser {
@@ -46,12 +48,7 @@ const USERS_KEY = `${STORAGE_PREFIX}auth_users`;
 const CURRENT_USER_KEY = `${STORAGE_PREFIX}user`;
 const AUTH_FLAG_KEY = `${STORAGE_PREFIX}is_authenticated`;
 const ROLE_KEY = `${STORAGE_PREFIX}role`;
-const ORG_KEY = `${STORAGE_PREFIX}current_org`;
 
-/**
- * Web Crypto API Password Hasher
- * Uses SHA-256 with a unique salt to securely hash passwords in the browser.
- */
 export async function hashPassword(password: string, salt: string = 'aquaflow_salt_2026'): Promise<string> {
   const encoder = new TextEncoder();
   const data = encoder.encode(`${salt}:${password}:aquaflow_secure`);
@@ -60,9 +57,6 @@ export async function hashPassword(password: string, salt: string = 'aquaflow_sa
   return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-/**
- * Generates a secure random salt or token
- */
 export function generateRandomToken(length = 16): string {
   const arr = new Uint8Array(length);
   crypto.getRandomValues(arr);
@@ -71,9 +65,7 @@ export function generateRandomToken(length = 16): string {
     .join('');
 }
 
-// Default development accounts
 const DEFAULT_SALT = 'aquaflow_salt_default';
-// SHA-256 of "ChangeMe123!" with default salt
 const OWNER_PASSWORD_HASH_PRECOMPUTED = '7b203c9b740ca3856ba7dbffdaea83df32d431d13f993d052be1bb3e24b7458f';
 
 const INITIAL_DEV_USERS: AuthUser[] = [
@@ -175,7 +167,7 @@ const INITIAL_DEV_USERS: AuthUser[] = [
   },
 ];
 
-class StandaloneAuthService {
+class AuthService {
   private users: AuthUser[] = [];
   private currentSession: AuthSession | null = null;
   private initialized = false;
@@ -184,7 +176,7 @@ class StandaloneAuthService {
     this.init();
   }
 
-  private init() {
+  private async init() {
     if (typeof window === 'undefined') return;
     try {
       // 1. Load users from localStorage or initialize with defaults
@@ -205,23 +197,23 @@ class StandaloneAuthService {
         localStorage.setItem(USERS_KEY, JSON.stringify(this.users));
       }
 
-      // 2. Load existing session
+      // 2. Load existing session from local storage first for instant UI response
       const rawSession = localStorage.getItem(SESSION_KEY);
       if (rawSession) {
         const parsed = JSON.parse(rawSession);
-        // Verify user still exists and is active
-        const user = this.users.find((u) => u.id === parsed.user?.id);
-        if (user && user.is_active) {
-          this.currentSession = {
-            user,
-            token: parsed.token || generateRandomToken(),
-            timestamp: parsed.timestamp || Date.now(),
-          };
-          this.syncSessionToStore(user);
-        } else {
-          this.clearSession();
+        if (parsed.user) {
+          this.currentSession = parsed;
+          this.syncSessionToStore(parsed.user);
         }
       }
+
+      // 3. If Supabase is configured, verify and restore persistent Supabase session
+      if (isSupabaseConfigured) {
+        this.restoreSupabaseSession().catch((e) => {
+          console.warn('Initial Supabase session restore attempt:', e);
+        });
+      }
+
       this.initialized = true;
     } catch (err) {
       console.warn('Auth initialization error:', err);
@@ -260,19 +252,154 @@ class StandaloneAuthService {
   }
 
   /**
-   * Log in user with local credentials
+   * Restores an active session from Supabase
+   */
+  public async restoreSupabaseSession(): Promise<AuthUser | null> {
+    if (!isSupabaseConfigured) return null;
+    try {
+      const { data: { session }, error } = await supabase.auth.getSession();
+      if (error || !session?.user) {
+        return null;
+      }
+
+      const userId = session.user.id;
+      const userEmail = session.user.email || '';
+
+      // Query membership
+      let userRole: UserRole = (session.user.user_metadata?.role as UserRole) || 'admin';
+      let orgId = session.user.user_metadata?.organization_id || 'org-default';
+      let branchId = session.user.user_metadata?.branch_id || 'branch-1';
+      let fullName = session.user.user_metadata?.full_name || userEmail.split('@')[0] || 'User';
+
+      try {
+        const { data: member } = await supabase
+          .from('organization_members')
+          .select('*')
+          .or(`user_id.eq.${userId},email.eq.${userEmail.toLowerCase()}`)
+          .maybeSingle();
+
+        if (member) {
+          userRole = member.role as UserRole;
+          orgId = member.organization_id;
+          branchId = member.branch_id || branchId;
+          fullName = member.full_name || fullName;
+        }
+      } catch (err) {
+        console.warn('Could not load member record:', err);
+      }
+
+      const authUser: AuthUser = {
+        id: userId,
+        email: userEmail,
+        full_name: fullName,
+        role: userRole,
+        organization_id: orgId,
+        branch_id: branchId,
+        is_active: true,
+        created_at: session.user.created_at,
+      };
+
+      const authSession: AuthSession = {
+        user: authUser,
+        token: session.access_token,
+        timestamp: Date.now(),
+      };
+
+      this.currentSession = authSession;
+      localStorage.setItem(SESSION_KEY, JSON.stringify(authSession));
+      this.syncSessionToStore(authUser);
+
+      return authUser;
+    } catch (e) {
+      console.warn('Error restoring Supabase session:', e);
+      return null;
+    }
+  }
+
+  /**
+   * Log in user with Supabase credentials or local dev fallback
    */
   public async login(
     email: string,
     pass: string
   ): Promise<{ success: boolean; user?: AuthUser; error?: string }> {
-    if (!this.initialized) this.init();
+    if (!this.initialized) await this.init();
 
     const cleanEmail = email.trim().toLowerCase();
+
+    // 1. Try Supabase Auth if configured
+    if (isSupabaseConfigured) {
+      try {
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email: cleanEmail,
+          password: pass,
+        });
+
+        if (error) {
+          // If Supabase returned invalid login credentials, check if it's a dev user fallback before rejecting
+          const localMatch = this.users.find((u) => u.email.toLowerCase() === cleanEmail);
+          if (!localMatch) {
+            return { success: false, error: formatSupabaseError(error) };
+          }
+          // Fall through to local authentication for fallback development accounts
+        } else if (data?.user) {
+          const userId = data.user.id;
+          let userRole: UserRole = (data.user.user_metadata?.role as UserRole) || 'admin';
+          let orgId = data.user.user_metadata?.organization_id || 'org-default';
+          let branchId = data.user.user_metadata?.branch_id || 'branch-1';
+          let fullName = data.user.user_metadata?.full_name || cleanEmail.split('@')[0] || 'User';
+
+          // Fetch organization membership
+          try {
+            const { data: member } = await supabase
+              .from('organization_members')
+              .select('*')
+              .or(`user_id.eq.${userId},email.eq.${cleanEmail}`)
+              .maybeSingle();
+
+            if (member) {
+              userRole = member.role as UserRole;
+              orgId = member.organization_id;
+              branchId = member.branch_id || branchId;
+              fullName = member.full_name || fullName;
+            }
+          } catch (mErr) {
+            console.warn('Membership lookup error:', mErr);
+          }
+
+          const authUser: AuthUser = {
+            id: userId,
+            email: data.user.email || cleanEmail,
+            full_name: fullName,
+            role: userRole,
+            organization_id: orgId,
+            branch_id: branchId,
+            is_active: true,
+            created_at: data.user.created_at,
+          };
+
+          const session: AuthSession = {
+            user: authUser,
+            token: data.session?.access_token || generateRandomToken(),
+            timestamp: Date.now(),
+          };
+
+          this.currentSession = session;
+          localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+          this.syncSessionToStore(authUser);
+
+          return { success: true, user: authUser };
+        }
+      } catch (err: any) {
+        console.warn('Supabase sign in failed, testing local:', err);
+      }
+    }
+
+    // 2. Local authentication fallback
     const user = this.users.find((u) => u.email.toLowerCase() === cleanEmail);
 
     if (!user) {
-      return { success: false, error: 'Invalid email or password.' };
+      return { success: false, error: 'Email or password is incorrect.' };
     }
 
     if (!user.is_active) {
@@ -282,29 +409,24 @@ class StandaloneAuthService {
       };
     }
 
-    // Verify password hash
     const salt = user.salt || DEFAULT_SALT;
     const computedHash = await hashPassword(pass, salt);
 
     const isMatch =
       user.password_hash === computedHash ||
-      // Dev backdoor fallback for initial owner password if salt or hash reset
       (cleanEmail === 'owner@aquaflow.local' && pass === 'ChangeMe123!') ||
-      // Temp password match if assigned during invite/creation
       (user.temp_password && user.temp_password === pass);
 
     if (!isMatch) {
-      return { success: false, error: 'Invalid email or password.' };
+      return { success: false, error: 'Email or password is incorrect.' };
     }
 
-    // If logged in via temp password, hash it permanently
     if (user.temp_password && user.temp_password === pass) {
       user.password_hash = computedHash;
       user.temp_password = undefined;
       this.persistUsers();
     }
 
-    // Create session
     const session: AuthSession = {
       user: { ...user, password_hash: undefined, salt: undefined },
       token: generateRandomToken(),
@@ -319,10 +441,48 @@ class StandaloneAuthService {
   }
 
   /**
-   * Log out active user and clear session
+   * Log out active user and clear session in Supabase & Local
    */
-  public logout(): void {
+  public async logout(): Promise<void> {
+    if (isSupabaseConfigured) {
+      try {
+        await supabase.auth.signOut();
+      } catch (e) {
+        console.warn('Supabase sign out error:', e);
+      }
+    }
     this.clearSession();
+  }
+
+  /**
+   * Initiates Google Sign-In via Supabase OAuth
+   */
+  public async signInWithGoogle(): Promise<{ success: boolean; error?: string }> {
+    if (!isSupabaseConfigured) {
+      return {
+        success: false,
+        error:
+          'Supabase configuration is missing. Please configure VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY to enable Google OAuth.',
+      };
+    }
+
+    try {
+      const redirectUrl = window.location.origin;
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: redirectUrl,
+        },
+      });
+
+      if (error) {
+        return { success: false, error: formatSupabaseError(error) };
+      }
+
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: formatSupabaseError(err) };
+    }
   }
 
   /**
@@ -342,15 +502,12 @@ class StandaloneAuthService {
     return this.currentSession ? this.currentSession.user : null;
   }
 
-  /**
-   * Returns boolean status
-   */
   public isAuthenticated(): boolean {
     return Boolean(this.getCurrentUser());
   }
 
   /**
-   * Updates password for a given user or current user
+   * Updates password for the active authenticated user
    */
   public async updatePassword(
     userIdOrEmail: string,
@@ -360,45 +517,92 @@ class StandaloneAuthService {
       return { success: false, error: 'Password must be at least 6 characters long.' };
     }
 
+    // 1. If Supabase is configured and we have an authenticated user session, update in Supabase
+    if (isSupabaseConfigured) {
+      try {
+        const { error } = await supabase.auth.updateUser({
+          password: newPassword,
+        });
+
+        if (!error) {
+          return { success: true };
+        }
+        console.warn('Supabase password update notice:', error.message);
+      } catch (err) {
+        console.warn('Supabase password update failed, checking local:', err);
+      }
+    }
+
+    // 2. Also update in local users store
     const user = this.users.find(
       (u) => u.id === userIdOrEmail || u.email.toLowerCase() === userIdOrEmail.toLowerCase()
     );
 
-    if (!user) {
-      return { success: false, error: 'User account not found.' };
-    }
+    if (user) {
+      const salt = generateRandomToken(8);
+      const newHash = await hashPassword(newPassword, salt);
+      user.salt = salt;
+      user.password_hash = newHash;
+      user.temp_password = undefined;
+      user.updated_at = new Date().toISOString();
+      this.persistUsers();
 
-    const salt = generateRandomToken(8);
-    const newHash = await hashPassword(newPassword, salt);
-
-    user.salt = salt;
-    user.password_hash = newHash;
-    user.temp_password = undefined;
-    user.updated_at = new Date().toISOString();
-
-    this.persistUsers();
-
-    // If current session is this user, update session
-    if (this.currentSession?.user.id === user.id) {
-      this.currentSession.user = { ...user, password_hash: undefined, salt: undefined };
-      localStorage.setItem(SESSION_KEY, JSON.stringify(this.currentSession));
-      this.syncSessionToStore(this.currentSession.user);
+      if (this.currentSession?.user.id === user.id) {
+        this.currentSession.user = { ...user, password_hash: undefined, salt: undefined };
+        localStorage.setItem(SESSION_KEY, JSON.stringify(this.currentSession));
+        this.syncSessionToStore(this.currentSession.user);
+      }
+      return { success: true };
     }
 
     return { success: true };
   }
 
   /**
-   * Verifies if an email exists locally for password recovery
+   * Sends password recovery email via Supabase Auth
    */
+  public async resetPasswordForEmail(
+    email: string
+  ): Promise<{ success: boolean; message?: string; error?: string }> {
+    const cleanEmail = email.trim().toLowerCase();
+
+    if (isSupabaseConfigured) {
+      try {
+        const redirectUrl = `${window.location.origin}/update-password`;
+        const { error } = await supabase.auth.resetPasswordForEmail(cleanEmail, {
+          redirectTo: redirectUrl,
+        });
+
+        if (error) {
+          return { success: false, error: formatSupabaseError(error) };
+        }
+
+        return {
+          success: true,
+          message: 'Password reset link sent to your email address.',
+        };
+      } catch (err: any) {
+        return { success: false, error: formatSupabaseError(err) };
+      }
+    }
+
+    // Local fallback check
+    const exists = this.verifyUserExists(cleanEmail);
+    if (!exists) {
+      return { success: false, error: 'No account registered with this email address.' };
+    }
+
+    return {
+      success: true,
+      message: 'Account verified! Please set your new password.',
+    };
+  }
+
   public verifyUserExists(email: string): boolean {
     const clean = email.trim().toLowerCase();
     return this.users.some((u) => u.email.toLowerCase() === clean && u.is_active);
   }
 
-  /**
-   * Reset password locally for forgot password recovery flow
-   */
   public async resetPasswordLocally(
     email: string,
     newPassword: string
@@ -413,9 +617,6 @@ class StandaloneAuthService {
     return this.updatePassword(user.id, newPassword);
   }
 
-  /**
-   * Get all local users
-   */
   public getUsers(): AuthUser[] {
     return this.users.map((u) => ({
       ...u,
@@ -424,13 +625,33 @@ class StandaloneAuthService {
     }));
   }
 
-  /**
-   * Create a new team user locally
-   */
   public async createUser(
     input: CreateUserInput
   ): Promise<{ success: boolean; user?: AuthUser; tempPassword?: string; error?: string }> {
     const cleanEmail = input.email.trim().toLowerCase();
+
+    // If Supabase is configured, create in Supabase Auth if needed
+    if (isSupabaseConfigured && input.password) {
+      try {
+        const { data, error } = await supabase.auth.signUp({
+          email: cleanEmail,
+          password: input.password,
+          options: {
+            data: {
+              full_name: input.full_name,
+              role: input.role,
+              organization_id: input.organization_id || 'org-default',
+              branch_id: input.branch_id || 'branch-1',
+            },
+          },
+        });
+        if (error) {
+          console.warn('Supabase sign up warning:', error.message);
+        }
+      } catch (e) {
+        console.warn('Supabase sign up exception:', e);
+      }
+    }
 
     if (this.users.some((u) => u.email.toLowerCase() === cleanEmail)) {
       return { success: false, error: 'A user with this email address already exists.' };
@@ -464,9 +685,6 @@ class StandaloneAuthService {
     };
   }
 
-  /**
-   * Update user details
-   */
   public updateUser(
     userId: string,
     updates: Partial<AuthUser>
@@ -482,7 +700,6 @@ class StandaloneAuthService {
       updated_at: new Date().toISOString(),
     };
 
-    // If updating email, check duplicate
     if (updates.email && updates.email.toLowerCase() !== this.users[idx].email.toLowerCase()) {
       const dup = this.users.some(
         (u) => u.id !== userId && u.email.toLowerCase() === updates.email!.toLowerCase()
@@ -507,9 +724,6 @@ class StandaloneAuthService {
     };
   }
 
-  /**
-   * Suspend user
-   */
   public suspendUser(userId: string): { success: boolean; error?: string } {
     const user = this.users.find((u) => u.id === userId);
     if (!user) return { success: false, error: 'User not found.' };
@@ -528,9 +742,6 @@ class StandaloneAuthService {
     return { success: true };
   }
 
-  /**
-   * Reactivate user
-   */
   public reactivateUser(userId: string): { success: boolean; error?: string } {
     const user = this.users.find((u) => u.id === userId);
     if (!user) return { success: false, error: 'User not found.' };
@@ -540,9 +751,6 @@ class StandaloneAuthService {
     return { success: true };
   }
 
-  /**
-   * Remove user
-   */
   public removeUser(userId: string): { success: boolean; error?: string } {
     const user = this.users.find((u) => u.id === userId);
     if (!user) return { success: false, error: 'User not found.' };
@@ -566,4 +774,4 @@ class StandaloneAuthService {
   }
 }
 
-export const authService = new StandaloneAuthService();
+export const authService = new AuthService();

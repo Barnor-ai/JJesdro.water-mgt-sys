@@ -20,6 +20,7 @@ import {
   Lock,
   Layers,
   FileText,
+  Clock,
 } from 'lucide-react';
 import { useERPStore } from '../store/useStore';
 import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/Card';
@@ -58,11 +59,15 @@ export function SettingsPage() {
     setUpgradeModalOpen,
     updateSupabasePassword,
     updateOrganization,
+    sessionTimeoutMinutes,
+    setSessionTimeoutMinutes,
   } = useERPStore();
 
   const userRole = (currentUser?.role || 'viewer').toLowerCase();
   const isOwnerOrAdmin =
     userRole === 'owner' || userRole === 'admin' || userRole === 'super_admin';
+  const isSystemOwnerOrSuperAdmin =
+    userRole === 'owner' || userRole === 'super_admin';
   const isAccountant = userRole === 'accountant';
 
   // Determine allowed tabs based on role
@@ -824,6 +829,54 @@ export function SettingsPage() {
               </div>
             </CardContent>
           </Card>
+
+          {/* Session Timeout Section */}
+          <Card>
+            <CardHeader>
+              <div className="flex items-center gap-2">
+                <Clock className="w-4 h-4 text-sky-500" />
+                <CardTitle>Session Timeout</CardTitle>
+              </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Configure automatic logout threshold after periods of user inactivity to safeguard plant operations and records
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/80">
+                <div>
+                  <h4 className="text-xs font-bold text-slate-900 dark:text-white">
+                    Automatic Inactivity Sign-Out
+                  </h4>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                    {isOwnerOrAdmin
+                      ? 'Select inactivity period before automatic sign-out. Inactivity timer resets on any mouse, keyboard, or touch interaction.'
+                      : 'Session logout policy enforced by workspace administrator. Automatically signs out idle accounts.'}
+                  </p>
+                </div>
+                <div className="w-full sm:w-64">
+                  <select
+                    value={sessionTimeoutMinutes}
+                    disabled={!isOwnerOrAdmin}
+                    onChange={(e) => {
+                      const val = Number(e.target.value);
+                      setSessionTimeoutMinutes(val);
+                      setSavedSuccess(true);
+                      setTimeout(() => setSavedSuccess(false), 2500);
+                    }}
+                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-medium focus:outline-none focus:ring-2 focus:ring-sky-500 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed shadow-xs"
+                  >
+                    <option value={5}>5 minutes</option>
+                    <option value={10}>10 minutes</option>
+                    <option value={15}>15 minutes</option>
+                    <option value={30}>30 minutes</option>
+                    <option value={60}>60 minutes</option>
+                    <option value={120}>120 minutes</option>
+                    <option value={0}>Never</option>
+                  </select>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
         </div>
       )}
 
@@ -837,24 +890,26 @@ export function SettingsPage() {
                 <CardTitle>Enterprise Administration & Data Archival</CardTitle>
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Authorized administrator data controls, snapshot downloads, and local workspace maintenance
+                Authorized administrator data controls and local workspace maintenance
               </p>
             </CardHeader>
             <CardContent className="space-y-5">
-              {/* Backup Card */}
-              <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/80 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <div>
-                  <h4 className="text-xs font-bold text-slate-900 dark:text-white">
-                    Complete Enterprise Data Snapshot
-                  </h4>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
-                    Download complete encrypted JSON archive of all batches, sales, expenses, inventory, and customer records.
-                  </p>
+              {/* Backup Card: Completely hidden from normal users; only available internally for system owner/super administrator */}
+              {isSystemOwnerOrSuperAdmin && (
+                <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/80 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div>
+                    <h4 className="text-xs font-bold text-slate-900 dark:text-white">
+                      Complete Enterprise Data Snapshot
+                    </h4>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                      Download complete encrypted JSON archive of all batches, sales, expenses, inventory, and customer records.
+                    </p>
+                  </div>
+                  <Button variant="primary" size="sm" onClick={handleExportBackup} className="shrink-0">
+                    <Download className="w-4 h-4 mr-1.5" /> Download Enterprise Backup (.json)
+                  </Button>
                 </div>
-                <Button variant="primary" size="sm" onClick={handleExportBackup} className="shrink-0">
-                  <Download className="w-4 h-4 mr-1.5" /> Download Enterprise Backup (.json)
-                </Button>
-              </div>
+              )}
 
               {/* Workspace Maintenance Card */}
               <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/80 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -876,6 +931,51 @@ export function SettingsPage() {
                 >
                   <RefreshCw className="w-4 h-4 mr-1.5" /> Verify Storage Equilibrium
                 </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Session Timeout Administration Card */}
+          <Card>
+            <CardHeader>
+              <div className="flex items-center gap-2">
+                <Clock className="w-4 h-4 text-sky-500" />
+                <CardTitle>Session Timeout</CardTitle>
+              </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Authorized administrator inactivity timeout policy
+              </p>
+            </CardHeader>
+            <CardContent>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/80">
+                <div>
+                  <h4 className="text-xs font-bold text-slate-900 dark:text-white">
+                    Automatic Inactivity Sign-Out
+                  </h4>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                    Select inactivity period before automatic sign-out. Inactivity timer resets on any mouse, keyboard, or touch interaction.
+                  </p>
+                </div>
+                <div className="w-full sm:w-64">
+                  <select
+                    value={sessionTimeoutMinutes}
+                    onChange={(e) => {
+                      const val = Number(e.target.value);
+                      setSessionTimeoutMinutes(val);
+                      setSavedSuccess(true);
+                      setTimeout(() => setSavedSuccess(false), 2500);
+                    }}
+                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-medium focus:outline-none focus:ring-2 focus:ring-sky-500 cursor-pointer shadow-xs"
+                  >
+                    <option value={5}>5 minutes</option>
+                    <option value={10}>10 minutes</option>
+                    <option value={15}>15 minutes</option>
+                    <option value={30}>30 minutes</option>
+                    <option value={60}>60 minutes</option>
+                    <option value={120}>120 minutes</option>
+                    <option value={0}>Never</option>
+                  </select>
+                </div>
               </div>
             </CardContent>
           </Card>

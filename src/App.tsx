@@ -25,6 +25,7 @@ import { BillingPage } from './pages/BillingPage';
 import { ApprovalsPage } from './pages/ApprovalsPage';
 import { UpdatePasswordPage } from './pages/UpdatePasswordPage';
 import { UpgradeModal } from './components/saas/UpgradeModal';
+import { SessionTimeoutManager } from './components/auth/SessionTimeoutManager';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
 
 function AppRoutes() {
@@ -36,6 +37,7 @@ function AppRoutes() {
 
   return (
     <AppLayout>
+      <SessionTimeoutManager />
       <Routes>
         <Route path="/" element={<DashboardOverview onNavigate={handleNavigate} />} />
         <Route path="/dashboard" element={<DashboardOverview onNavigate={handleNavigate} />} />

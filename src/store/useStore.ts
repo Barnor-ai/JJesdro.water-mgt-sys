@@ -222,6 +222,7 @@ export interface ERPStoreState {
   approvalWorkflows: ApprovalWorkflow[];
   upgradeModalOpen: boolean;
   upgradeModalReason?: string;
+  sessionTimeoutMinutes: number;
 
   // Master Data & Operations
   branches: Branch[];
@@ -314,6 +315,7 @@ const globalState: ERPStoreState = {
   chartOfAccounts: loadStored<ChartOfAccount[]>('chart_of_accounts', initialChartOfAccounts),
   journalEntries: loadStored<JournalEntry[]>('journal_entries', initialJournalEntries),
   customExpenseCategories: loadStored<string[]>('custom_expense_categories', []),
+  sessionTimeoutMinutes: loadStored<number>('session_timeout_minutes', 30),
 
   isOnline: typeof navigator !== 'undefined' ? navigator.onLine : true,
   syncStatus: 'synced',
@@ -1648,6 +1650,130 @@ export function useERPStore() {
   };
 
   // Machines
+  const addMachine = (data: Partial<Machine> & { name: string; capacity_per_hour?: number }): { success: boolean; error?: string; machine?: Machine } => {
+    const currentOrgId = globalState.currentOrganization?.id || 'org-default';
+    const name = (data.name || '').trim();
+    const code = (data.code || '').trim().toUpperCase();
+
+    if (!name) {
+      return { success: false, error: 'Machine Name is required.' };
+    }
+    if (!code) {
+      return { success: false, error: 'Machine Code/ID is required.' };
+    }
+    if (!data.type) {
+      return { success: false, error: 'Machine Type is required.' };
+    }
+    const capacity = Number(data.capacity_per_hour) || Number(data.capacity) || 0;
+    if (capacity <= 0) {
+      return { success: false, error: 'Machine capacity must be a positive number greater than 0.' };
+    }
+
+    // Prevent duplicate Machine Codes/IDs within the same company/organization
+    const duplicate = globalState.machines.find(
+      (m) =>
+        (!m.organization_id || m.organization_id === currentOrgId) &&
+        m.code &&
+        m.code.trim().toUpperCase() === code
+    );
+    if (duplicate) {
+      return {
+        success: false,
+        error: `Machine Code/ID "${code}" already exists in your organization. Please assign a unique identifier.`,
+      };
+    }
+
+    const newMachine: Machine = {
+      id: `m-${Date.now()}`,
+      organization_id: currentOrgId,
+      branch_id: data.branch_id || globalState.currentBranchId || 'branch-1',
+      name,
+      code,
+      type: data.type,
+      manufacturer: data.manufacturer || '',
+      model: data.model || data.model_number || '',
+      model_number: data.model || data.model_number || '',
+      serial_number: data.serial_number || '',
+      purchase_date: data.purchase_date || '',
+      purchase_cost: Number(data.purchase_cost) || 0,
+      location: data.location || '',
+      capacity_per_hour: capacity,
+      capacity: capacity,
+      status: data.status || 'Active',
+      installation_date: data.installation_date || '',
+      warranty_expiry: data.warranty_expiry || '',
+      notes: data.notes || '',
+      efficiency: data.efficiency !== undefined ? Number(data.efficiency) : 98,
+      last_serviced_date: data.last_serviced_date || new Date().toISOString().split('T')[0],
+      next_maintenance_date: data.next_maintenance_date || '',
+      temperature: data.temperature || 20,
+      pressure: data.pressure || 6.0,
+      cycles_today: 0,
+      created_at: new Date().toISOString(),
+    };
+
+    globalState.machines = [newMachine, ...globalState.machines];
+    saveStored('machines', globalState.machines);
+    saveTableToIndexedDB('machines', globalState.machines);
+    addAuditLog('CREATE', 'machines', newMachine.id, { name, code, status: newMachine.status });
+    notify();
+    return { success: true, machine: newMachine };
+  };
+
+  const updateMachine = (id: string, updates: Partial<Machine>): { success: boolean; error?: string } => {
+    const currentOrgId = globalState.currentOrganization?.id || 'org-default';
+    if (updates.code) {
+      const code = updates.code.trim().toUpperCase();
+      const duplicate = globalState.machines.find(
+        (m) =>
+          m.id !== id &&
+          (!m.organization_id || m.organization_id === currentOrgId) &&
+          m.code &&
+          m.code.trim().toUpperCase() === code
+      );
+      if (duplicate) {
+        return {
+          success: false,
+          error: `Machine Code/ID "${code}" already exists in your organization. Please assign a unique identifier.`,
+        };
+      }
+    }
+
+    let found = false;
+    globalState.machines = globalState.machines.map((m) => {
+      if (m.id === id) {
+        found = true;
+        const capacity = updates.capacity_per_hour !== undefined
+          ? Number(updates.capacity_per_hour)
+          : (updates.capacity !== undefined ? Number(updates.capacity) : m.capacity_per_hour);
+
+        return {
+          ...m,
+          ...updates,
+          name: updates.name ? updates.name.trim() : m.name,
+          code: updates.code ? updates.code.trim().toUpperCase() : m.code,
+          capacity_per_hour: capacity,
+          capacity: capacity,
+        };
+      }
+      return m;
+    });
+
+    if (!found) {
+      return { success: false, error: 'Machine record not found.' };
+    }
+
+    saveStored('machines', globalState.machines);
+    saveTableToIndexedDB('machines', globalState.machines);
+    addAuditLog('UPDATE', 'machines', id, updates);
+    notify();
+    return { success: true };
+  };
+
+  const retireMachine = (id: string): { success: boolean; error?: string } => {
+    return updateMachine(id, { status: 'Retired' });
+  };
+
   const updateMachineStatus = (id: string, status: Machine['status'], efficiency?: number) => {
     globalState.machines = globalState.machines.map((m) =>
       m.id === id
@@ -1655,12 +1781,30 @@ export function useERPStore() {
             ...m,
             status,
             efficiency: efficiency !== undefined ? efficiency : m.efficiency,
-            last_maintenance: status === 'Maintenance' ? new Date().toISOString() : m.last_maintenance,
+            last_maintenance: (status === 'Maintenance' || status === 'Under Maintenance') ? new Date().toISOString() : m.last_maintenance,
           }
         : m
     );
     saveStored('machines', globalState.machines);
     addAuditLog('UPDATE', 'machines', id, { status, efficiency });
+    notify();
+  };
+
+  // Session Timeout
+  const setSessionTimeoutMinutes = (minutes: number) => {
+    globalState.sessionTimeoutMinutes = minutes;
+    saveStored('session_timeout_minutes', minutes);
+    try {
+      localStorage.setItem('h2o_session_timeout_minutes', String(minutes));
+    } catch {}
+    if (globalState.currentOrganization) {
+      globalState.currentOrganization = {
+        ...globalState.currentOrganization,
+        session_timeout_minutes: minutes,
+      };
+      saveStored('current_org', globalState.currentOrganization);
+    }
+    addAuditLog('UPDATE', 'settings.security', 'session_timeout', { minutes });
     notify();
   };
 
@@ -2225,8 +2369,14 @@ export function useERPStore() {
     return res;
   };
 
+  const currentOrgId = state.currentOrganization?.id || 'org-default';
+  const orgScopedMachines = state.machines.filter(
+    (m) => !m.organization_id || m.organization_id === currentOrgId
+  );
+
   return {
     ...state,
+    machines: orgScopedMachines,
     setTheme,
     toggleTheme,
     switchRole,
@@ -2234,6 +2384,10 @@ export function useERPStore() {
     loginUser,
     signupUser,
     logoutUser,
+    addMachine,
+    updateMachine,
+    retireMachine,
+    setSessionTimeoutMinutes,
     addProductionBatch,
     addWarehouseTransaction,
     addSale,

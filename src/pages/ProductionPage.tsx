@@ -607,9 +607,12 @@ export function ProductionPage() {
               value={machineUsed}
               onChange={(e) => setMachineUsed(e.target.value)}
             >
-              {machines.map((m) => (
+              {(machines.filter((m) => m.status !== 'Retired').length > 0
+                ? machines.filter((m) => m.status !== 'Retired')
+                : machines
+              ).map((m) => (
                 <option key={m.id} value={m.name}>
-                  {m.name} ({m.status})
+                  {m.code ? `[${m.code}] ` : ''}{m.name} ({m.status})
                 </option>
               ))}
             </Select>

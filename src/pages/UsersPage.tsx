@@ -50,6 +50,104 @@ export function UsersPage() {
   const [inviteRole, setInviteRole] = useState<OrganizationRole>('production_manager');
   const [copiedToken, setCopiedToken] = useState<string | null>(null);
 
+  // Permission Matrix State & Management
+  const [isAddPermModalOpen, setIsAddPermModalOpen] = useState(false);
+  const [newPermModule, setNewPermModule] = useState('');
+  const [permSuccessMsg, setPermSuccessMsg] = useState(false);
+
+  const userRole = (currentUser?.role || activeRole || 'viewer').toLowerCase();
+  const canManageTeam =
+    userRole === 'owner' || userRole === 'admin' || userRole === 'super_admin';
+
+  interface RolePerm {
+    id: string;
+    module: string;
+    owner: boolean;
+    admin: boolean;
+    prod_mgr: boolean;
+    wh_mgr: boolean;
+    sales_mgr: boolean;
+    acc: boolean;
+    aud: boolean;
+    vwr: boolean;
+    isCustom?: boolean;
+  }
+
+  const defaultRoleMatrix: RolePerm[] = [
+    { id: 'perm-1', module: 'Executive Overview', owner: true, admin: true, prod_mgr: true, wh_mgr: true, sales_mgr: true, acc: true, aud: true, vwr: true },
+    { id: 'perm-2', module: 'Production Batches & Quality', owner: true, admin: true, prod_mgr: true, wh_mgr: false, sales_mgr: false, acc: false, aud: true, vwr: false },
+    { id: 'perm-3', module: 'Machinery & Equipment Controls', owner: true, admin: true, prod_mgr: true, wh_mgr: false, sales_mgr: false, acc: false, aud: false, vwr: false },
+    { id: 'perm-4', module: 'Warehouse Stock & Transfers', owner: true, admin: true, prod_mgr: true, wh_mgr: true, sales_mgr: false, acc: false, aud: true, vwr: false },
+    { id: 'perm-5', module: 'POS Sales & Customer Invoicing', owner: true, admin: true, prod_mgr: false, wh_mgr: false, sales_mgr: true, acc: true, aud: true, vwr: false },
+    { id: 'perm-6', module: 'Accounts Receivable & Debtors', owner: true, admin: true, prod_mgr: false, wh_mgr: false, sales_mgr: true, acc: true, aud: true, vwr: false },
+    { id: 'perm-7', module: 'Financial P&L & Expenses', owner: true, admin: true, prod_mgr: false, wh_mgr: false, sales_mgr: false, acc: true, aud: true, vwr: false },
+    { id: 'perm-8', module: 'Approval Authorization', owner: true, admin: true, prod_mgr: true, wh_mgr: false, sales_mgr: false, acc: true, aud: false, vwr: false },
+    { id: 'perm-9', module: 'Subscription & Billing', owner: true, admin: true, prod_mgr: false, wh_mgr: false, sales_mgr: false, acc: true, aud: false, vwr: false },
+    { id: 'perm-10', module: 'Audit Trail Logs', owner: true, admin: true, prod_mgr: false, wh_mgr: false, sales_mgr: false, acc: false, aud: true, vwr: false },
+  ];
+
+  const [roleMatrix, setRoleMatrix] = useState<RolePerm[]>(() => {
+    try {
+      const saved = localStorage.getItem('h2o_role_permissions_matrix');
+      if (saved) {
+        return JSON.parse(saved);
+      }
+    } catch {}
+    return defaultRoleMatrix;
+  });
+
+  const savePermissions = (updated: RolePerm[]) => {
+    setRoleMatrix(updated);
+    try {
+      localStorage.setItem('h2o_role_permissions_matrix', JSON.stringify(updated));
+    } catch {}
+    setPermSuccessMsg(true);
+    setTimeout(() => setPermSuccessMsg(false), 2500);
+  };
+
+  const handleTogglePermission = (id: string, roleKey: keyof Omit<RolePerm, 'id' | 'module' | 'isCustom'>) => {
+    if (!canManageTeam || roleKey === 'owner') return;
+    const updated = roleMatrix.map((item) => {
+      if (item.id === id) {
+        return {
+          ...item,
+          [roleKey]: !item[roleKey],
+        };
+      }
+      return item;
+    });
+    savePermissions(updated);
+  };
+
+  const handleAddCustomPermission = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newPermModule.trim()) return;
+
+    const newPerm: RolePerm = {
+      id: `perm-custom-${Date.now()}`,
+      module: newPermModule.trim(),
+      owner: true,
+      admin: true,
+      prod_mgr: false,
+      wh_mgr: false,
+      sales_mgr: false,
+      acc: false,
+      aud: false,
+      vwr: false,
+      isCustom: true,
+    };
+
+    savePermissions([...roleMatrix, newPerm]);
+    setNewPermModule('');
+    setIsAddPermModalOpen(false);
+  };
+
+  const handleRemovePermission = (id: string) => {
+    if (!canManageTeam) return;
+    const updated = roleMatrix.filter((item) => item.id !== id);
+    savePermissions(updated);
+  };
+
   const activePlan =
     subscriptionPlans.find((p) => p.id === currentSubscription?.plan_id) || subscriptionPlans[1];
 
@@ -80,18 +178,6 @@ export function UsersPage() {
     setCopiedToken(token);
     setTimeout(() => setCopiedToken(null), 2500);
   };
-
-  const roleMatrix = [
-    { module: 'Executive Overview', owner: true, admin: true, prod_mgr: true, wh_mgr: true, sales_mgr: true, acc: true, aud: true, vwr: true },
-    { module: 'Production Batches & Quality', owner: true, admin: true, prod_mgr: true, wh_mgr: false, sales_mgr: false, acc: false, aud: true, vwr: false },
-    { module: 'Warehouse Stock & Transfers', owner: true, admin: true, prod_mgr: true, wh_mgr: true, sales_mgr: false, acc: false, aud: true, vwr: false },
-    { module: 'POS Sales & Customer Invoicing', owner: true, admin: true, prod_mgr: false, wh_mgr: false, sales_mgr: true, acc: true, aud: true, vwr: false },
-    { module: 'Accounts Receivable & Debtors', owner: true, admin: true, prod_mgr: false, wh_mgr: false, sales_mgr: true, acc: true, aud: true, vwr: false },
-    { module: 'Financial P&L & Expenses', owner: true, admin: true, prod_mgr: false, wh_mgr: false, sales_mgr: false, acc: true, aud: true, vwr: false },
-    { module: 'Approval Authorization', owner: true, admin: true, prod_mgr: true, wh_mgr: false, sales_mgr: false, acc: true, aud: false, vwr: false },
-    { module: 'Subscription & Billing', owner: true, admin: true, prod_mgr: false, wh_mgr: false, sales_mgr: false, acc: true, aud: false, vwr: false },
-    { module: 'Audit Trail Logs', owner: true, admin: true, prod_mgr: false, wh_mgr: false, sales_mgr: false, acc: false, aud: true, vwr: false },
-  ];
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
@@ -208,7 +294,7 @@ export function UsersPage() {
                         <Badge variant="warning" size="sm" className="capitalize font-semibold">
                           Workspace Owner
                         </Badge>
-                      ) : (
+                      ) : canManageTeam ? (
                         <select
                           value={m.role}
                           onChange={(e) => updateMemberRole(m.id, e.target.value as OrganizationRole)}
@@ -225,24 +311,40 @@ export function UsersPage() {
                           <option value="auditor">Auditor</option>
                           <option value="viewer">Viewer (Read-Only)</option>
                         </select>
+                      ) : (
+                        <Badge variant="secondary" size="sm" className="capitalize font-medium">
+                          {(m.role || 'viewer').replace('_', ' ')}
+                        </Badge>
                       )}
                     </td>
                     <td className="p-3 text-slate-500">{m.phone || '—'}</td>
                     <td className="p-3">
-                      <button
-                        type="button"
-                        onClick={() => toggleMemberStatus(m.id)}
-                        className={`px-2 py-0.5 rounded-full text-[10px] font-bold cursor-pointer transition-colors ${
-                          m.is_active
-                            ? 'bg-emerald-100 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-200'
-                            : 'bg-slate-200 dark:bg-slate-800 text-slate-500 hover:bg-slate-300'
-                        }`}
-                      >
-                        {m.is_active ? 'Active' : 'Disabled'}
-                      </button>
+                      {canManageTeam ? (
+                        <button
+                          type="button"
+                          onClick={() => toggleMemberStatus(m.id)}
+                          className={`px-2 py-0.5 rounded-full text-[10px] font-bold cursor-pointer transition-colors ${
+                            m.is_active
+                              ? 'bg-emerald-100 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-200'
+                              : 'bg-slate-200 dark:bg-slate-800 text-slate-500 hover:bg-slate-300'
+                          }`}
+                        >
+                          {m.is_active ? 'Active' : 'Disabled'}
+                        </button>
+                      ) : (
+                        <span
+                          className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                            m.is_active
+                              ? 'bg-emerald-100 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300'
+                              : 'bg-slate-200 dark:bg-slate-800 text-slate-500'
+                          }`}
+                        >
+                          {m.is_active ? 'Active' : 'Disabled'}
+                        </span>
+                      )}
                     </td>
                     <td className="p-3 text-right pr-5">
-                      {m.role !== 'owner' && (
+                      {canManageTeam && m.role !== 'owner' ? (
                         <button
                           type="button"
                           onClick={() => removeMember(m.id)}
@@ -251,7 +353,7 @@ export function UsersPage() {
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
-                      )}
+                      ) : null}
                     </td>
                   </tr>
                 ))}
@@ -311,14 +413,16 @@ export function UsersPage() {
                               </>
                             )}
                           </button>
-                          <button
-                            type="button"
-                            onClick={() => revokeInvitation(inv.id)}
-                            className="p-1 rounded-md text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/20"
-                            title="Revoke Invitation"
-                          >
-                            <X className="w-3.5 h-3.5" />
-                          </button>
+                          {canManageTeam && (
+                            <button
+                              type="button"
+                              onClick={() => revokeInvitation(inv.id)}
+                              className="p-1 rounded-md text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/20"
+                              title="Revoke Invitation"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -332,11 +436,30 @@ export function UsersPage() {
 
       {/* RBAC Permission Matrix */}
       <Card>
-        <CardHeader>
-          <CardTitle>Role Permission & Security Matrix</CardTitle>
-          <p className="text-xs text-slate-500 dark:text-slate-400">
-            Enforced policies based on Supabase PostgreSQL Row-Level Security (RLS)
-          </p>
+        <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <CardTitle>Role Permission & Security Matrix</CardTitle>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+              Role-based authorization and departmental access policies across modules
+            </p>
+          </div>
+          <div className="flex items-center gap-3">
+            {permSuccessMsg && (
+              <span className="inline-flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400 font-semibold animate-fade-in">
+                <CheckCircle2 className="w-3.5 h-3.5" /> Permissions Saved
+              </span>
+            )}
+            {canManageTeam && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setIsAddPermModalOpen(true)}
+                className="text-xs shrink-0"
+              >
+                <Plus className="w-3.5 h-3.5 mr-1" /> Add Permission
+              </Button>
+            )}
+          </div>
         </CardHeader>
         <CardContent className="p-0">
           <div className="overflow-x-auto">
@@ -351,39 +474,77 @@ export function UsersPage() {
                   <th className="p-3 text-center">Sales</th>
                   <th className="p-3 text-center">Finance</th>
                   <th className="p-3 text-center">Auditor</th>
-                  <th className="p-3 text-center pr-5">Viewer</th>
+                  <th className="p-3 text-center">Viewer</th>
+                  {canManageTeam && <th className="p-3 text-center pr-5 w-12">Actions</th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                {roleMatrix.map((rm, idx) => (
-                  <tr key={idx} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/40">
+                {roleMatrix.map((rm) => (
+                  <tr key={rm.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/40">
                     <td className="p-3.5 pl-5 font-semibold text-slate-900 dark:text-white">
-                      {rm.module}
+                      <div className="flex items-center gap-2">
+                        <span>{rm.module}</span>
+                        {rm.isCustom && (
+                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800/50">
+                            Custom
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="p-3 text-center">
-                      {rm.owner ? <Check className="w-4 h-4 text-emerald-500 mx-auto" /> : <X className="w-4 h-4 text-slate-300 mx-auto" />}
+                      <Check className="w-4 h-4 text-emerald-500 mx-auto" />
                     </td>
-                    <td className="p-3 text-center">
-                      {rm.admin ? <Check className="w-4 h-4 text-emerald-500 mx-auto" /> : <X className="w-4 h-4 text-slate-300 mx-auto" />}
-                    </td>
-                    <td className="p-3 text-center">
-                      {rm.prod_mgr ? <Check className="w-4 h-4 text-emerald-500 mx-auto" /> : <X className="w-4 h-4 text-slate-300 mx-auto" />}
-                    </td>
-                    <td className="p-3 text-center">
-                      {rm.wh_mgr ? <Check className="w-4 h-4 text-emerald-500 mx-auto" /> : <X className="w-4 h-4 text-slate-300 mx-auto" />}
-                    </td>
-                    <td className="p-3 text-center">
-                      {rm.sales_mgr ? <Check className="w-4 h-4 text-emerald-500 mx-auto" /> : <X className="w-4 h-4 text-slate-300 mx-auto" />}
-                    </td>
-                    <td className="p-3 text-center">
-                      {rm.acc ? <Check className="w-4 h-4 text-emerald-500 mx-auto" /> : <X className="w-4 h-4 text-slate-300 mx-auto" />}
-                    </td>
-                    <td className="p-3 text-center">
-                      {rm.aud ? <Check className="w-4 h-4 text-emerald-500 mx-auto" /> : <X className="w-4 h-4 text-slate-300 mx-auto" />}
-                    </td>
-                    <td className="p-3 text-center pr-5">
-                      {rm.vwr ? <Check className="w-4 h-4 text-emerald-500 mx-auto" /> : <X className="w-4 h-4 text-slate-300 mx-auto" />}
-                    </td>
+                    {(
+                      [
+                        'admin',
+                        'prod_mgr',
+                        'wh_mgr',
+                        'sales_mgr',
+                        'acc',
+                        'aud',
+                        'vwr',
+                      ] as const
+                    ).map((roleKey) => (
+                      <td key={roleKey} className="p-3 text-center">
+                        <button
+                          type="button"
+                          disabled={!canManageTeam}
+                          onClick={() => handleTogglePermission(rm.id, roleKey)}
+                          className={`p-1 rounded-md transition-colors ${
+                            canManageTeam
+                              ? 'hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer'
+                              : 'cursor-default opacity-90'
+                          }`}
+                          title={
+                            canManageTeam
+                              ? `Click to ${rm[roleKey] ? 'revoke' : 'grant'} permission`
+                              : undefined
+                          }
+                        >
+                          {rm[roleKey] ? (
+                            <Check className="w-4 h-4 text-emerald-500 mx-auto" />
+                          ) : (
+                            <X className="w-4 h-4 text-slate-300 dark:text-slate-600 mx-auto" />
+                          )}
+                        </button>
+                      </td>
+                    ))}
+                    {canManageTeam && (
+                      <td className="p-3 text-center pr-5">
+                        {rm.isCustom ? (
+                          <button
+                            type="button"
+                            onClick={() => handleRemovePermission(rm.id)}
+                            className="p-1 rounded-md text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/20 transition-colors"
+                            title="Remove Permission"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        ) : (
+                          <span className="text-slate-300 dark:text-slate-700 text-xs">—</span>
+                        )}
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -391,6 +552,42 @@ export function UsersPage() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Add Custom Permission Modal */}
+      <Modal
+        isOpen={isAddPermModalOpen}
+        onClose={() => setIsAddPermModalOpen(false)}
+        title="Add Role Permission"
+        description="Define a new department feature permission policy for this workspace."
+        maxWidth="sm"
+      >
+        <form onSubmit={handleAddCustomPermission} className="space-y-4 text-xs">
+          <div>
+            <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+              Permission / Module Name *
+            </label>
+            <input
+              type="text"
+              required
+              placeholder="e.g. Chemical Lab Sampling & QA"
+              value={newPermModule}
+              onChange={(e) => setNewPermModule(e.target.value)}
+              className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-white focus:outline-none"
+            />
+          </div>
+          <p className="text-[11px] text-slate-500 dark:text-slate-400">
+            Once created, authorized administrators can toggle access for each departmental role.
+          </p>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button type="button" variant="outline" size="sm" onClick={() => setIsAddPermModalOpen(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" variant="primary" size="sm">
+              Save Permission
+            </Button>
+          </div>
+        </form>
+      </Modal>
 
       {/* Send Invite Modal */}
       <Modal

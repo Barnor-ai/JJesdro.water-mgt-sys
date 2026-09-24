@@ -120,7 +120,7 @@ export function OfflineSyncModal({ isOpen, onClose, isOnline }: OfflineSyncModal
               </div>
               <p className="text-xs mt-0.5 opacity-90">
                 {isOnline
-                  ? 'All local transactions sync automatically with Supabase.'
+                  ? 'All local transactions sync automatically with the central server.'
                   : 'Offline mode — changes will sync when connection is restored.'}
               </p>
             </div>

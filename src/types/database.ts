@@ -51,6 +51,7 @@ export interface Organization {
   timezone: string;
   plan_id: SubscriptionPlanId;
   status: 'active' | 'trial' | 'suspended' | 'canceled';
+  session_timeout_minutes?: number;
   created_at: string;
   updated_at?: string;
 }
@@ -187,7 +188,17 @@ export type SaleType =
   | 'Business';
 
 export type PaymentStatus = 'Paid' | 'Partial' | 'Unpaid' | 'Overdue';
-export type MachineStatus = 'Operational' | 'Maintenance' | 'Offline' | 'Degraded' | 'Idle' | 'Faulty';
+export type MachineStatus =
+  | 'Active'
+  | 'Operational'
+  | 'Under Maintenance'
+  | 'Maintenance'
+  | 'Inactive'
+  | 'Retired'
+  | 'Offline'
+  | 'Degraded'
+  | 'Idle'
+  | 'Faulty';
 export type PurchaseStatus = 'Draft' | 'Ordered' | 'Received' | 'Cancelled';
 
 export type ExpenseCategory =
@@ -311,11 +322,22 @@ export interface Machine {
   organization_id?: string;
   branch_id?: string;
   name: string;
+  code?: string; // Machine Code/ID e.g. MCH-001
   type?: string;
+  manufacturer?: string;
+  model?: string;
   model_number?: string;
-  status: MachineStatus;
-  efficiency: number; // percentage e.g. 96.5
+  serial_number?: string;
+  purchase_date?: string;
+  purchase_cost?: number;
+  location?: string;
   capacity_per_hour: number;
+  capacity?: string | number;
+  status: MachineStatus;
+  installation_date?: string;
+  warranty_expiry?: string;
+  notes?: string;
+  efficiency: number; // percentage e.g. 96.5
   last_serviced_date: string;
   last_maintenance?: string;
   next_service_date?: string;

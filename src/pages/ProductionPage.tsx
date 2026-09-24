@@ -44,6 +44,8 @@ export function ProductionPage() {
     machines,
     currentUser,
     productionBudgets,
+    rawMaterials = [],
+    updateRawMaterialStock,
     addProductionBatch,
     addProductionBudget,
     deleteProductionBudget,
@@ -63,6 +65,12 @@ export function ProductionPage() {
   const [shift, setShift] = useState<ShiftType>('Morning');
   const [machineUsed, setMachineUsed] = useState(machines[0]?.name || 'Krones Rotary Line #1');
   const [operatorName, setOperatorName] = useState(currentUser?.full_name || 'Alexander Reed');
+
+  // Raw Materials Consumed State
+  const [selectedPreformId, setSelectedPreformId] = useState<string>('');
+  const [selectedCapId, setSelectedCapId] = useState<string>('');
+  const [selectedLabelId, setSelectedLabelId] = useState<string>('');
+  const [deductRawMaterials, setDeductRawMaterials] = useState<boolean>(true);
   const [quantityProduced, setQuantityProduced] = useState<number>(5000);
   const [rejectedQuantity, setRejectedQuantity] = useState<number>(45);
   const [damagedBottles, setDamagedBottles] = useState<number>(20);
@@ -113,6 +121,29 @@ export function ProductionPage() {
       notes,
       created_by: currentUser?.id || 'user-1',
     });
+
+    // Deduct consumed raw materials if enabled
+    if (deductRawMaterials) {
+      const units = Number(quantityProduced) || 0;
+      if (selectedPreformId) {
+        const rm = rawMaterials.find((r) => r.id === selectedPreformId);
+        if (rm) {
+          updateRawMaterialStock(rm.id, Math.max(0, rm.current_stock - units));
+        }
+      }
+      if (selectedCapId) {
+        const rm = rawMaterials.find((r) => r.id === selectedCapId);
+        if (rm) {
+          updateRawMaterialStock(rm.id, Math.max(0, rm.current_stock - units));
+        }
+      }
+      if (selectedLabelId) {
+        const rm = rawMaterials.find((r) => r.id === selectedLabelId);
+        if (rm) {
+          updateRawMaterialStock(rm.id, Math.max(0, rm.current_stock - units));
+        }
+      }
+    }
 
     try {
       confetti({
@@ -676,6 +707,90 @@ export function ProductionPage() {
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
           />
+
+          {/* Raw Materials Consumption Section */}
+          <div className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 space-y-3 bg-slate-50/50 dark:bg-slate-900/50">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                <Layers className="w-4 h-4 text-emerald-500" />
+                Raw Materials Consumed in this Run
+              </span>
+              <label className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={deductRawMaterials}
+                  onChange={(e) => setDeductRawMaterials(e.target.checked)}
+                  className="rounded text-sky-600 focus:ring-sky-500"
+                />
+                Auto-deduct from stock
+              </label>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div>
+                <label className="block text-[11px] font-medium text-slate-500 mb-1">
+                  Bottle Preforms SKU
+                </label>
+                <select
+                  value={selectedPreformId}
+                  onChange={(e) => setSelectedPreformId(e.target.value)}
+                  className="w-full px-2.5 py-1.5 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-sky-500"
+                >
+                  <option value="">-- No preforms deducted --</option>
+                  {rawMaterials
+                    .filter((r) => r.category.toLowerCase().includes('bottle') || r.name.toLowerCase().includes('preform'))
+                    .concat(rawMaterials.filter((r) => !r.category.toLowerCase().includes('bottle') && !r.name.toLowerCase().includes('preform')))
+                    .map((r) => (
+                      <option key={r.id} value={r.id}>
+                        {r.name} ({r.current_stock.toLocaleString()} {r.unit} avail)
+                      </option>
+                    ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-medium text-slate-500 mb-1">
+                  Caps & Closures SKU
+                </label>
+                <select
+                  value={selectedCapId}
+                  onChange={(e) => setSelectedCapId(e.target.value)}
+                  className="w-full px-2.5 py-1.5 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-sky-500"
+                >
+                  <option value="">-- No caps deducted --</option>
+                  {rawMaterials
+                    .filter((r) => r.category.toLowerCase().includes('cap') || r.name.toLowerCase().includes('cap'))
+                    .concat(rawMaterials.filter((r) => !r.category.toLowerCase().includes('cap') && !r.name.toLowerCase().includes('cap')))
+                    .map((r) => (
+                      <option key={r.id} value={r.id}>
+                        {r.name} ({r.current_stock.toLocaleString()} {r.unit} avail)
+                      </option>
+                    ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-medium text-slate-500 mb-1">
+                  Labels / Shrink Wrap
+                </label>
+                <select
+                  value={selectedLabelId}
+                  onChange={(e) => setSelectedLabelId(e.target.value)}
+                  className="w-full px-2.5 py-1.5 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-sky-500"
+                >
+                  <option value="">-- No labels deducted --</option>
+                  {rawMaterials
+                    .filter((r) => r.category.toLowerCase().includes('label') || r.name.toLowerCase().includes('label'))
+                    .concat(rawMaterials.filter((r) => !r.category.toLowerCase().includes('label') && !r.name.toLowerCase().includes('label')))
+                    .map((r) => (
+                      <option key={r.id} value={r.id}>
+                        {r.name} ({r.current_stock.toLocaleString()} {r.unit} avail)
+                      </option>
+                    ))}
+                </select>
+              </div>
+            </div>
+          </div>
 
           {/* Real-time Calculation Summary Preview Card */}
           <div className="p-4 rounded-xl bg-slate-900 text-slate-100 border border-slate-800 space-y-2">

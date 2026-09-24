@@ -273,11 +273,20 @@ export interface RawMaterial {
   organization_id?: string;
   branch_id?: string;
   name: string;
+  code?: string;
+  sku?: string;
   category: SupplierCategory | string;
   unit: string;
   current_stock: number;
   reorder_level: number;
+  minimum_stock?: number;
+  reorder_point?: number;
   cost_per_unit: number;
+  supplier_id?: string;
+  supplier_name?: string;
+  status?: 'active' | 'inactive';
+  notes?: string;
+  description?: string;
   last_restocked?: string;
   created_at: string;
 }
@@ -287,15 +296,23 @@ export interface Supplier {
   organization_id?: string;
   branch_id?: string;
   name: string;
+  code?: string;
   category?: SupplierCategory | string;
+  supplier_type?: string;
   contact?: string;
   contact_person?: string;
   email: string;
   phone: string;
   address: string;
+  country?: string;
+  tax_id?: string;
   payment_terms?: string;
+  bank_details?: string;
+  notes?: string;
   supplied_items?: string[];
+  materials_supplied?: string;
   rating?: number;
+  status?: 'active' | 'inactive';
   created_at?: string;
 }
 
@@ -419,16 +436,21 @@ export interface Customer {
   organization_id?: string;
   branch_id?: string;
   name: string;
+  business_name?: string;
   type: CustomerType;
   contact_person?: string;
   phone: string;
   email: string;
   address: string;
+  country?: string;
+  tax_id?: string;
   credit_limit: number;
   outstanding_balance: number;
   payment_terms?: string;
   total_orders?: number;
+  notes?: string;
   status?: 'Active' | 'Inactive' | 'Suspended';
+  is_active?: boolean;
   created_at?: string;
 }
 

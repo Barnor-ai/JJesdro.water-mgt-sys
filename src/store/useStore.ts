@@ -199,6 +199,13 @@ export function sanitizeSupplier(s: any): Supplier {
     phone: s.phone || '',
     email: s.email || '',
     address: s.address || '',
+    code: s.code || '',
+    country: s.country || 'Ghana',
+    tax_id: s.tax_id || '',
+    bank_details: s.bank_details || '',
+    notes: s.notes || '',
+    supplier_type: s.supplier_type || s.category || 'Manufacturer',
+    status: s.status === 'inactive' ? 'inactive' : 'active',
   };
 }
 
@@ -443,12 +450,68 @@ export const syncToSupabase = async () => {
         id: c.id,
         organization_id: orgId,
         name: c.name,
+        business_name: c.business_name || null,
         type: c.type,
+        contact_person: c.contact_person || null,
         phone: c.phone,
         email: c.email,
         address: c.address,
+        country: c.country || 'Ghana',
+        tax_id: c.tax_id || null,
         credit_limit: c.credit_limit,
         outstanding_balance: c.outstanding_balance,
+        current_balance: c.outstanding_balance,
+        payment_terms: c.payment_terms || 'Net 30',
+        notes: c.notes || null,
+        status: c.status || 'Active',
+        is_active: c.status !== 'Inactive',
+      });
+    }
+
+    // 6. Suppliers
+    for (const sup of globalState.suppliers) {
+      await supabaseDataService.upsertRecord('suppliers', {
+        id: sup.id,
+        organization_id: orgId,
+        name: sup.name,
+        code: sup.code || null,
+        contact_person: sup.contact_person || sup.contact || null,
+        email: sup.email,
+        phone: sup.phone,
+        address: sup.address,
+        country: sup.country || 'Ghana',
+        tax_id: sup.tax_id || null,
+        supplier_type: sup.supplier_type || sup.category || 'Manufacturer',
+        payment_terms: sup.payment_terms || 'Net 30',
+        bank_details: sup.bank_details || null,
+        notes: sup.notes || null,
+        rating: sup.rating ?? 5.0,
+        status: sup.status || 'active',
+        materials_supplied: Array.isArray(sup.supplied_items)
+          ? sup.supplied_items.join(', ')
+          : sup.materials_supplied || '',
+      });
+    }
+
+    // 7. Raw Materials
+    for (const rm of globalState.rawMaterials) {
+      await supabaseDataService.upsertRecord('raw_materials', {
+        id: rm.id,
+        organization_id: orgId,
+        branch_id: rm.branch_id || globalState.currentBranchId,
+        name: rm.name,
+        code: rm.code || rm.sku || null,
+        sku: rm.sku || rm.code || null,
+        category: rm.category,
+        current_stock: rm.current_stock,
+        minimum_stock: rm.reorder_level || rm.minimum_stock || 0,
+        reorder_point: rm.reorder_level || rm.reorder_point || 0,
+        unit: rm.unit,
+        cost_per_unit: rm.cost_per_unit,
+        supplier_id: rm.supplier_id || null,
+        supplier_name: rm.supplier_name || null,
+        status: rm.status || 'active',
+        notes: rm.notes || rm.description || null,
       });
     }
 
@@ -1079,63 +1142,474 @@ export function useERPStore() {
 
   // Customers
   const addCustomer = (customer: Omit<Customer, 'id' | 'created_at' | 'organization_id' | 'branch_id'>) => {
+    const orgId = globalState.currentOrganization?.id || 'org-default';
+    
+    // Prevent duplicate customer names within organization
+    const cleanName = customer.name.trim().toLowerCase();
+    const existing = globalState.customers.find(
+      (c) => c.organization_id === orgId && c.name.trim().toLowerCase() === cleanName
+    );
+    if (existing) {
+      addNotification({
+        title: 'Duplicate Customer Detected',
+        message: `A customer named "${customer.name}" already exists in this workspace.`,
+        type: 'warning',
+      });
+      return { success: false, error: `Customer "${customer.name}" already exists.` };
+    }
+
     const newCustomer: Customer = {
       ...customer,
       id: `CUST-${Date.now()}`,
-      organization_id: globalState.currentOrganization?.id || 'org-default',
+      organization_id: orgId,
       branch_id: globalState.currentBranchId,
+      country: customer.country || 'Ghana',
+      payment_terms: customer.payment_terms || 'Net 30',
+      status: customer.status || 'Active',
+      is_active: customer.status !== 'Inactive',
+      outstanding_balance: customer.outstanding_balance ?? 0,
+      total_orders: customer.total_orders ?? 0,
       created_at: new Date().toISOString(),
     };
+
     globalState.customers = [newCustomer, ...globalState.customers];
     saveStored('customers', globalState.customers);
-    addAuditLog('CREATE', 'customers', newCustomer.id, { name: newCustomer.name });
+    saveTableToIndexedDB('customers', globalState.customers);
+
+    enqueueSyncTransaction({
+      entity_type: 'customers',
+      entity_id: newCustomer.id,
+      action: 'CREATE',
+      payload: newCustomer,
+      organization_id: orgId,
+    });
+
+    if (isSupabaseConfigured) {
+      supabaseDataService
+        .upsertRecord('customers', {
+          id: newCustomer.id,
+          organization_id: orgId,
+          name: newCustomer.name,
+          business_name: newCustomer.business_name || null,
+          type: newCustomer.type,
+          contact_person: newCustomer.contact_person || null,
+          phone: newCustomer.phone,
+          email: newCustomer.email,
+          address: newCustomer.address,
+          country: newCustomer.country,
+          tax_id: newCustomer.tax_id || null,
+          credit_limit: newCustomer.credit_limit,
+          current_balance: newCustomer.outstanding_balance,
+          payment_terms: newCustomer.payment_terms,
+          notes: newCustomer.notes || null,
+          status: newCustomer.status,
+          is_active: newCustomer.is_active,
+        })
+        .catch((err) => console.warn('Direct Supabase customer save exception:', err));
+    }
+
+    addAuditLog('CREATE', 'customers', newCustomer.id, { name: newCustomer.name, type: newCustomer.type });
+    addNotification({
+      title: 'Customer Added',
+      message: `${newCustomer.name} was successfully registered and is available across sales & invoicing.`,
+      type: 'success',
+    });
     notify();
+    return { success: true, customer: newCustomer };
   };
 
   const updateCustomer = (id: string, updates: Partial<Customer>) => {
-    globalState.customers = globalState.customers.map((c) => (c.id === id ? { ...c, ...updates } : c));
+    const existingIndex = globalState.customers.findIndex((c) => c.id === id);
+    if (existingIndex === -1) {
+      return { success: false, error: 'Customer not found.' };
+    }
+
+    const existing = globalState.customers[existingIndex];
+    const updatedCust: Customer = {
+      ...existing,
+      ...updates,
+      is_active: updates.status ? updates.status !== 'Inactive' : (updates.is_active ?? existing.is_active),
+    };
+
+    globalState.customers[existingIndex] = updatedCust;
     saveStored('customers', globalState.customers);
+    saveTableToIndexedDB('customers', globalState.customers);
+
+    enqueueSyncTransaction({
+      entity_type: 'customers',
+      entity_id: id,
+      action: 'UPDATE',
+      payload: updatedCust,
+      organization_id: updatedCust.organization_id || globalState.currentOrganization?.id || 'org-default',
+    });
+
+    if (isSupabaseConfigured) {
+      supabaseDataService
+        .upsertRecord('customers', {
+          id: updatedCust.id,
+          organization_id: updatedCust.organization_id || globalState.currentOrganization?.id || 'org-default',
+          name: updatedCust.name,
+          business_name: updatedCust.business_name || null,
+          type: updatedCust.type,
+          contact_person: updatedCust.contact_person || null,
+          phone: updatedCust.phone,
+          email: updatedCust.email,
+          address: updatedCust.address,
+          country: updatedCust.country || 'Ghana',
+          tax_id: updatedCust.tax_id || null,
+          credit_limit: updatedCust.credit_limit,
+          current_balance: updatedCust.outstanding_balance,
+          payment_terms: updatedCust.payment_terms || 'Net 30',
+          notes: updatedCust.notes || null,
+          status: updatedCust.status || 'Active',
+          is_active: updatedCust.is_active,
+        })
+        .catch((err) => console.warn('Direct Supabase customer update exception:', err));
+    }
+
     addAuditLog('UPDATE', 'customers', id, updates);
+    addNotification({
+      title: 'Customer Updated',
+      message: `Profile updates for ${updatedCust.name} saved to database.`,
+      type: 'success',
+    });
     notify();
+    return { success: true, customer: updatedCust };
+  };
+
+  const toggleCustomerStatus = (id: string) => {
+    const cust = globalState.customers.find((c) => c.id === id);
+    if (!cust) return;
+    const newStatus = cust.status === 'Active' ? 'Inactive' : 'Active';
+    updateCustomer(id, { status: newStatus, is_active: newStatus === 'Active' });
   };
 
   // Raw Materials
   const addRawMaterial = (rm: Omit<RawMaterial, 'id' | 'created_at' | 'organization_id' | 'branch_id'>) => {
+    const orgId = globalState.currentOrganization?.id || 'org-default';
+    
+    // Prevent duplicate raw material name or code within organization
+    const cleanName = rm.name.trim().toLowerCase();
+    const existing = globalState.rawMaterials.find(
+      (m) => m.organization_id === orgId && m.name.trim().toLowerCase() === cleanName
+    );
+    if (existing) {
+      addNotification({
+        title: 'Duplicate Raw Material',
+        message: `Raw material "${rm.name}" already exists in your inventory catalog.`,
+        type: 'warning',
+      });
+      return { success: false, error: `Raw material "${rm.name}" already exists.` };
+    }
+
+    const code = rm.code || rm.sku || `RM-${Math.floor(100 + Math.random() * 900)}`;
     const newRM: RawMaterial = {
       ...rm,
-      id: `RM-${Date.now()}`,
-      organization_id: globalState.currentOrganization?.id || 'org-default',
+      id: `rm-${Date.now()}`,
+      code,
+      sku: rm.sku || code,
+      organization_id: orgId,
       branch_id: globalState.currentBranchId,
+      unit: rm.unit || 'pcs',
+      category: rm.category || 'Raw Materials',
+      current_stock: Number(rm.current_stock) || 0,
+      reorder_level: Number(rm.reorder_level) || 0,
+      cost_per_unit: Number(rm.cost_per_unit) || 0,
+      status: rm.status || 'active',
+      last_restocked: new Date().toISOString(),
       created_at: new Date().toISOString(),
     };
+
     globalState.rawMaterials = [newRM, ...globalState.rawMaterials];
     saveStored('raw_materials', globalState.rawMaterials);
-    addAuditLog('CREATE', 'raw_materials', newRM.id, { name: newRM.name });
+    saveTableToIndexedDB('raw_materials', globalState.rawMaterials);
+
+    enqueueSyncTransaction({
+      entity_type: 'raw_materials',
+      entity_id: newRM.id,
+      action: 'CREATE',
+      payload: newRM,
+      organization_id: orgId,
+    });
+
+    if (isSupabaseConfigured) {
+      supabaseDataService
+        .upsertRecord('raw_materials', {
+          id: newRM.id,
+          organization_id: orgId,
+          branch_id: newRM.branch_id,
+          name: newRM.name,
+          code: newRM.code,
+          sku: newRM.sku,
+          category: newRM.category,
+          current_stock: newRM.current_stock,
+          minimum_stock: newRM.reorder_level,
+          reorder_point: newRM.reorder_level,
+          unit: newRM.unit,
+          cost_per_unit: newRM.cost_per_unit,
+          supplier_id: newRM.supplier_id || null,
+          supplier_name: newRM.supplier_name || null,
+          status: newRM.status,
+          notes: newRM.notes || newRM.description || null,
+        })
+        .catch((err) => console.warn('Direct Supabase raw material save exception:', err));
+    }
+
+    addAuditLog('CREATE', 'raw_materials', newRM.id, { name: newRM.name, code: newRM.code });
+    addNotification({
+      title: 'Raw Material Created',
+      message: `${newRM.name} registered. Ready for purchase orders and production consumption.`,
+      type: 'success',
+    });
+    notify();
+    return { success: true, rawMaterial: newRM };
+  };
+
+  const updateRawMaterial = (id: string, updates: Partial<RawMaterial>) => {
+    const existingIndex = globalState.rawMaterials.findIndex((m) => m.id === id);
+    if (existingIndex === -1) {
+      return { success: false, error: 'Raw material not found.' };
+    }
+
+    const existing = globalState.rawMaterials[existingIndex];
+    const updatedRM: RawMaterial = {
+      ...existing,
+      ...updates,
+      current_stock: updates.current_stock !== undefined ? Number(updates.current_stock) : existing.current_stock,
+      reorder_level: updates.reorder_level !== undefined ? Number(updates.reorder_level) : existing.reorder_level,
+      cost_per_unit: updates.cost_per_unit !== undefined ? Number(updates.cost_per_unit) : existing.cost_per_unit,
+      last_restocked: updates.current_stock !== undefined && updates.current_stock !== existing.current_stock
+        ? new Date().toISOString()
+        : existing.last_restocked,
+    };
+
+    globalState.rawMaterials[existingIndex] = updatedRM;
+    saveStored('raw_materials', globalState.rawMaterials);
+    saveTableToIndexedDB('raw_materials', globalState.rawMaterials);
+
+    enqueueSyncTransaction({
+      entity_type: 'raw_materials',
+      entity_id: id,
+      action: 'UPDATE',
+      payload: updatedRM,
+      organization_id: updatedRM.organization_id || globalState.currentOrganization?.id || 'org-default',
+    });
+
+    if (isSupabaseConfigured) {
+      supabaseDataService
+        .upsertRecord('raw_materials', {
+          id: updatedRM.id,
+          organization_id: updatedRM.organization_id || globalState.currentOrganization?.id || 'org-default',
+          branch_id: updatedRM.branch_id || globalState.currentBranchId,
+          name: updatedRM.name,
+          code: updatedRM.code || null,
+          sku: updatedRM.sku || null,
+          category: updatedRM.category,
+          current_stock: updatedRM.current_stock,
+          minimum_stock: updatedRM.reorder_level,
+          reorder_point: updatedRM.reorder_level,
+          unit: updatedRM.unit,
+          cost_per_unit: updatedRM.cost_per_unit,
+          supplier_id: updatedRM.supplier_id || null,
+          supplier_name: updatedRM.supplier_name || null,
+          status: updatedRM.status || 'active',
+          notes: updatedRM.notes || updatedRM.description || null,
+        })
+        .catch((err) => console.warn('Direct Supabase raw material update exception:', err));
+    }
+
+    addAuditLog('UPDATE', 'raw_materials', id, updates);
+    addNotification({
+      title: 'Raw Material Updated',
+      message: `${updatedRM.name} specifications updated successfully.`,
+      type: 'success',
+    });
+    notify();
+    return { success: true, rawMaterial: updatedRM };
+  };
+
+  const deleteRawMaterial = (id: string) => {
+    const rm = globalState.rawMaterials.find((m) => m.id === id);
+    globalState.rawMaterials = globalState.rawMaterials.filter((m) => m.id !== id);
+    saveStored('raw_materials', globalState.rawMaterials);
+    saveTableToIndexedDB('raw_materials', globalState.rawMaterials);
+
+    enqueueSyncTransaction({
+      entity_type: 'raw_materials',
+      entity_id: id,
+      action: 'DELETE',
+      payload: { id },
+    });
+
+    if (isSupabaseConfigured) {
+      supabaseDataService.deleteRecord('raw_materials', id).catch(() => {});
+    }
+
+    addAuditLog('DELETE', 'raw_materials', id, { deleted_record: rm });
+    addNotification({
+      title: 'Raw Material Removed',
+      message: `${rm?.name || 'Raw material'} removed from active master catalog.`,
+      type: 'info',
+    });
     notify();
   };
 
+  const toggleRawMaterialStatus = (id: string) => {
+    const rm = globalState.rawMaterials.find((m) => m.id === id);
+    if (!rm) return;
+    const newStatus = rm.status === 'active' ? 'inactive' : 'active';
+    updateRawMaterial(id, { status: newStatus });
+  };
+
   const updateRawMaterialStock = (id: string, newStock: number) => {
-    globalState.rawMaterials = globalState.rawMaterials.map((rm) =>
-      rm.id === id ? { ...rm, current_stock: newStock, last_restocked: new Date().toISOString() } : rm
-    );
-    saveStored('raw_materials', globalState.rawMaterials);
-    addAuditLog('UPDATE', 'raw_materials', id, { new_stock: newStock });
-    notify();
+    updateRawMaterial(id, { current_stock: newStock });
   };
 
   // Suppliers
   const addSupplier = (supplier: Omit<Supplier, 'id' | 'created_at' | 'organization_id' | 'branch_id'>) => {
+    const orgId = globalState.currentOrganization?.id || 'org-default';
+
+    // Prevent duplicate supplier names or codes within organization
+    const cleanName = supplier.name.trim().toLowerCase();
+    const existing = globalState.suppliers.find(
+      (s) => s.organization_id === orgId && s.name.trim().toLowerCase() === cleanName
+    );
+    if (existing) {
+      addNotification({
+        title: 'Duplicate Supplier Detected',
+        message: `Supplier "${supplier.name}" already exists in your workspace directory.`,
+        type: 'warning',
+      });
+      return { success: false, error: `Supplier "${supplier.name}" already exists.` };
+    }
+
+    const code = supplier.code || `SUP-${Math.floor(100 + Math.random() * 900)}`;
     const newSup: Supplier = sanitizeSupplier({
       ...supplier,
-      id: `SUP-${Date.now()}`,
-      organization_id: globalState.currentOrganization?.id || 'org-default',
+      id: `sup-${Date.now()}`,
+      code,
+      organization_id: orgId,
       branch_id: globalState.currentBranchId,
+      country: supplier.country || 'Ghana',
+      payment_terms: supplier.payment_terms || 'Net 30',
+      status: supplier.status || 'active',
+      rating: supplier.rating ?? 5.0,
       created_at: new Date().toISOString(),
     });
+
     globalState.suppliers = [newSup, ...globalState.suppliers];
     saveStored('suppliers', globalState.suppliers);
-    addAuditLog('CREATE', 'suppliers', newSup.id, { name: newSup.name });
+    saveTableToIndexedDB('suppliers', globalState.suppliers);
+
+    enqueueSyncTransaction({
+      entity_type: 'suppliers',
+      entity_id: newSup.id,
+      action: 'CREATE',
+      payload: newSup,
+      organization_id: orgId,
+    });
+
+    if (isSupabaseConfigured) {
+      supabaseDataService
+        .upsertRecord('suppliers', {
+          id: newSup.id,
+          organization_id: orgId,
+          name: newSup.name,
+          code: newSup.code || null,
+          contact_person: newSup.contact_person || newSup.contact || null,
+          email: newSup.email,
+          phone: newSup.phone,
+          address: newSup.address,
+          country: newSup.country,
+          tax_id: newSup.tax_id || null,
+          supplier_type: newSup.supplier_type || newSup.category || 'Manufacturer',
+          payment_terms: newSup.payment_terms,
+          bank_details: newSup.bank_details || null,
+          notes: newSup.notes || null,
+          rating: newSup.rating,
+          status: newSup.status,
+          materials_supplied: Array.isArray(newSup.supplied_items)
+            ? newSup.supplied_items.join(', ')
+            : newSup.materials_supplied || '',
+        })
+        .catch((err) => console.warn('Direct Supabase supplier save exception:', err));
+    }
+
+    addAuditLog('CREATE', 'suppliers', newSup.id, { name: newSup.name, code: newSup.code });
+    addNotification({
+      title: 'Supplier Added',
+      message: `${newSup.name} was successfully registered and is immediately available for purchasing.`,
+      type: 'success',
+    });
     notify();
+    return { success: true, supplier: newSup };
+  };
+
+  const updateSupplier = (id: string, updates: Partial<Supplier>) => {
+    const existingIndex = globalState.suppliers.findIndex((s) => s.id === id);
+    if (existingIndex === -1) {
+      return { success: false, error: 'Supplier not found.' };
+    }
+
+    const existing = globalState.suppliers[existingIndex];
+    const updatedSup: Supplier = sanitizeSupplier({
+      ...existing,
+      ...updates,
+    });
+
+    globalState.suppliers[existingIndex] = updatedSup;
+    saveStored('suppliers', globalState.suppliers);
+    saveTableToIndexedDB('suppliers', globalState.suppliers);
+
+    enqueueSyncTransaction({
+      entity_type: 'suppliers',
+      entity_id: id,
+      action: 'UPDATE',
+      payload: updatedSup,
+      organization_id: updatedSup.organization_id || globalState.currentOrganization?.id || 'org-default',
+    });
+
+    if (isSupabaseConfigured) {
+      supabaseDataService
+        .upsertRecord('suppliers', {
+          id: updatedSup.id,
+          organization_id: updatedSup.organization_id || globalState.currentOrganization?.id || 'org-default',
+          name: updatedSup.name,
+          code: updatedSup.code || null,
+          contact_person: updatedSup.contact_person || updatedSup.contact || null,
+          email: updatedSup.email,
+          phone: updatedSup.phone,
+          address: updatedSup.address,
+          country: updatedSup.country || 'Ghana',
+          tax_id: updatedSup.tax_id || null,
+          supplier_type: updatedSup.supplier_type || updatedSup.category || 'Manufacturer',
+          payment_terms: updatedSup.payment_terms || 'Net 30',
+          bank_details: updatedSup.bank_details || null,
+          notes: updatedSup.notes || null,
+          rating: updatedSup.rating ?? 5.0,
+          status: updatedSup.status || 'active',
+          materials_supplied: Array.isArray(updatedSup.supplied_items)
+            ? updatedSup.supplied_items.join(', ')
+            : updatedSup.materials_supplied || '',
+        })
+        .catch((err) => console.warn('Direct Supabase supplier update exception:', err));
+    }
+
+    addAuditLog('UPDATE', 'suppliers', id, updates);
+    addNotification({
+      title: 'Supplier Updated',
+      message: `Supplier profile for ${updatedSup.name} saved successfully.`,
+      type: 'success',
+    });
+    notify();
+    return { success: true, supplier: updatedSup };
+  };
+
+  const toggleSupplierStatus = (id: string) => {
+    const sup = globalState.suppliers.find((s) => s.id === id);
+    if (!sup) return;
+    const newStatus = sup.status === 'active' ? 'inactive' : 'active';
+    updateSupplier(id, { status: newStatus });
   };
 
   // Purchase Orders
@@ -2097,12 +2571,64 @@ export function useERPStore() {
 
   // Team & Invitations
   const inviteMember = async (email: string, role: OrganizationRole, invited_by_name?: string) => {
+    const cleanEmail = email.trim().toLowerCase();
+    const orgId = globalState.currentOrganization?.id || 'org-default';
+
+    // 1. Check if user is already an active member of this organization
+    const existingMember = globalState.organizationMembers.find(
+      (m) => m.organization_id === orgId && m.email.toLowerCase() === cleanEmail && m.is_active
+    );
+    if (existingMember) {
+      addNotification({
+        title: 'Already a Member',
+        message: `${email} is already an active staff member in this organization.`,
+        type: 'warning',
+      });
+      return { success: false, error: `${email} is already an active staff member in this organization.` };
+    }
+
+    // 2. Check if a pending invite already exists for this email
+    const existingInvite = globalState.invitations.find(
+      (i) => i.organization_id === orgId && i.email.toLowerCase() === cleanEmail && i.status === 'pending'
+    );
+    if (existingInvite) {
+      // Refresh the existing invitation with new expiry and role
+      const refreshed: Invitation = {
+        ...existingInvite,
+        role,
+        expires_at: new Date(Date.now() + 7 * 86400000).toISOString(),
+        created_at: new Date().toISOString(),
+      };
+      globalState.invitations = globalState.invitations.map((i) => (i.id === existingInvite.id ? refreshed : i));
+      saveStored('invitations', globalState.invitations);
+      saveTableToIndexedDB('invitations', globalState.invitations);
+      enqueueSyncTransaction({
+        entity_type: 'invitations',
+        entity_id: refreshed.id,
+        action: 'UPDATE',
+        payload: refreshed,
+        organization_id: orgId,
+      });
+
+      if (isSupabaseConfigured) {
+        supabaseDataService.upsertRecord('invitations', refreshed).catch(() => {});
+      }
+
+      addNotification({
+        title: 'Invitation Refreshed',
+        message: `Existing pending invitation for ${email} was refreshed with role ${(role || 'operator').replace('_', ' ').toUpperCase()} (valid for 7 days).`,
+        type: 'info',
+      });
+      notify();
+      return { success: true, invitation: refreshed, refreshed: true };
+    }
+
     const secureToken = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
     const newInvite: Invitation = {
       id: `inv-${Date.now()}`,
-      organization_id: globalState.currentOrganization.id,
+      organization_id: orgId,
       organization_name: globalState.currentOrganization.name,
-      email,
+      email: cleanEmail,
       role,
       token: secureToken,
       invited_by: globalState.currentUser?.id || 'owner',
@@ -2114,16 +2640,68 @@ export function useERPStore() {
 
     globalState.invitations = [newInvite, ...globalState.invitations];
     saveStored('invitations', globalState.invitations);
+    saveTableToIndexedDB('invitations', globalState.invitations);
 
-    addAuditLog('CREATE', 'invitations', newInvite.id, { email, role });
+    enqueueSyncTransaction({
+      entity_type: 'invitations',
+      entity_id: newInvite.id,
+      action: 'CREATE',
+      payload: newInvite,
+      organization_id: orgId,
+    });
+
+    if (isSupabaseConfigured) {
+      supabaseDataService.upsertRecord('invitations', newInvite).catch(() => {});
+    }
+
+    addAuditLog('CREATE', 'invitations', newInvite.id, { email: cleanEmail, role });
     addNotification({
-      title: 'Invitation Sent',
-      message: `Invitation generated for ${email} with role ${(role || 'operator').replace('_', ' ').toUpperCase()}.`,
-      type: 'info',
+      title: 'Invitation Dispatched',
+      message: `Invitation generated for ${email} with role ${(role || 'operator').replace('_', ' ').toUpperCase()}. Link valid for 7 days.`,
+      type: 'success',
     });
 
     notify();
     return { success: true, invitation: newInvite };
+  };
+
+  const resendInvitation = async (id: string) => {
+    const invite = globalState.invitations.find((i) => i.id === id);
+    if (!invite) {
+      return { success: false, error: 'Invitation record not found.' };
+    }
+
+    const refreshed: Invitation = {
+      ...invite,
+      expires_at: new Date(Date.now() + 7 * 86400000).toISOString(),
+      created_at: new Date().toISOString(),
+    };
+
+    globalState.invitations = globalState.invitations.map((i) => (i.id === id ? refreshed : i));
+    saveStored('invitations', globalState.invitations);
+    saveTableToIndexedDB('invitations', globalState.invitations);
+
+    enqueueSyncTransaction({
+      entity_type: 'invitations',
+      entity_id: refreshed.id,
+      action: 'UPDATE',
+      payload: refreshed,
+      organization_id: refreshed.organization_id,
+    });
+
+    if (isSupabaseConfigured) {
+      supabaseDataService.upsertRecord('invitations', refreshed).catch(() => {});
+    }
+
+    addAuditLog('UPDATE', 'invitations', refreshed.id, { action: 'resend', email: refreshed.email });
+    addNotification({
+      title: 'Invitation Re-sent',
+      message: `Fresh 7-day invitation link active for ${refreshed.email}.`,
+      type: 'success',
+    });
+
+    notify();
+    return { success: true, invitation: refreshed };
   };
 
   const acceptInvitation = async (token: string, password?: string, fullName?: string) => {
@@ -2394,9 +2972,15 @@ export function useERPStore() {
     recordPayment,
     addCustomer,
     updateCustomer,
+    toggleCustomerStatus,
     addRawMaterial,
+    updateRawMaterial,
+    deleteRawMaterial,
+    toggleRawMaterialStatus,
     updateRawMaterialStock,
     addSupplier,
+    updateSupplier,
+    toggleSupplierStatus,
     addPurchaseOrder,
     updatePurchaseOrder,
     receivePurchaseOrder,
@@ -2437,6 +3021,7 @@ export function useERPStore() {
     updateOrganization,
     updateCurrentUserProfile,
     inviteMember,
+    resendInvitation,
     acceptInvitation,
     revokeInvitation,
     updateMemberRole,

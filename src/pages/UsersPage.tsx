@@ -16,6 +16,7 @@ import {
   Building2,
   Users,
   CheckCircle2,
+  AlertTriangle,
 } from 'lucide-react';
 import { useERPStore } from '../store/useStore';
 import { OrganizationRole, UserRole } from '../types/database';
@@ -34,6 +35,7 @@ export function UsersPage() {
     currentSubscription,
     subscriptionPlans,
     inviteMember,
+    resendInvitation,
     revokeInvitation,
     updateMemberRole,
     toggleMemberStatus,
@@ -48,6 +50,7 @@ export function UsersPage() {
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteName, setInviteName] = useState('');
   const [inviteRole, setInviteRole] = useState<OrganizationRole>('production_manager');
+  const [inviteError, setInviteError] = useState('');
   const [copiedToken, setCopiedToken] = useState<string | null>(null);
 
   // Permission Matrix State & Management
@@ -164,11 +167,15 @@ export function UsersPage() {
 
   const handleSendInvite = async (e: React.FormEvent) => {
     e.preventDefault();
+    setInviteError('');
     const result = await inviteMember(inviteEmail, inviteRole, inviteName);
     if (result.success) {
       setIsInviteModalOpen(false);
       setInviteEmail('');
       setInviteName('');
+      setInviteError('');
+    } else if (result.error) {
+      setInviteError(result.error);
     }
   };
 
@@ -400,6 +407,14 @@ export function UsersPage() {
                         <div className="flex items-center justify-end gap-2">
                           <button
                             type="button"
+                            onClick={() => resendInvitation(inv.id)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 text-[11px] font-semibold transition-colors cursor-pointer"
+                            title="Resend invitation and refresh 7-day validity"
+                          >
+                            <Send className="w-3 h-3 text-sky-500" /> Resend
+                          </button>
+                          <button
+                            type="button"
                             onClick={() => handleCopyLink(inv.token)}
                             className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 text-[11px] font-semibold transition-colors cursor-pointer"
                           >
@@ -598,6 +613,13 @@ export function UsersPage() {
         maxWidth="md"
       >
         <form onSubmit={handleSendInvite} className="space-y-4 text-xs">
+          {inviteError && (
+            <div className="p-3 rounded-lg bg-rose-50 dark:bg-rose-950/30 text-rose-600 dark:text-rose-400 font-semibold flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 shrink-0" />
+              <span>{inviteError}</span>
+            </div>
+          )}
+
           <div>
             <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
               Staff Full Name

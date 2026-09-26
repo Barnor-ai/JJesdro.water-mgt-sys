@@ -29,6 +29,7 @@ import {
   Globe,
   Sparkles,
   Building2,
+  Database,
   PanelLeftClose,
   PanelLeftOpen,
   ChevronDown,
@@ -255,6 +256,13 @@ export function Sidebar({
       href: '/audit-logs',
       icon: History,
       roles: ['owner', 'admin', 'auditor'],
+      group: 'admin',
+    },
+    {
+      name: 'Backup & Restore',
+      href: '/backup',
+      icon: Database,
+      roles: adminRoles,
       group: 'admin',
     },
     {

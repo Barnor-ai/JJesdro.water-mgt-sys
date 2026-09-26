@@ -26,6 +26,7 @@ import {
   RefreshCw,
   Power,
   ShieldCheck,
+  Upload,
 } from 'lucide-react';
 import { useERPStore } from '../store/useStore';
 import {
@@ -43,6 +44,7 @@ import { Modal } from '../components/ui/Modal';
 import { ConfirmDialog } from '../components/ui/ConfirmDialog';
 import { formatCurrency, formatDate } from '../lib/utils';
 import { exportToExcel, generatePurchaseOrderPDF } from '../lib/exportUtils';
+import { ExcelImportModal, ImportEntityType } from '../components/common/ExcelImportModal';
 
 export function SuppliersPage() {
   const {
@@ -61,7 +63,12 @@ export function SuppliersPage() {
     addPurchaseOrder,
     receivePurchaseOrder,
     deletePurchaseOrder,
+    importSuppliers,
+    importPurchases,
+    importRawMaterials,
   } = useERPStore();
+
+  const [importModalType, setImportModalType] = useState<ImportEntityType | null>(null);
 
   const [activeTab, setActiveTab] = useState<'pos' | 'suppliers' | 'raw'>('pos');
 
@@ -683,27 +690,36 @@ export function SuppliersPage() {
                 </p>
               </div>
 
-              {/* Quick Action Export */}
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() =>
-                  exportToExcel(
-                    filteredPOs.map((p) => ({
-                      'PO Number': p.po_number,
-                      Supplier: p.supplier_name,
-                      'Order Date': p.order_date,
-                      'Expected Delivery': p.expected_delivery_date,
-                      'Total Cost': p.total_amount,
-                      Status: p.status,
-                      Notes: p.notes || '',
-                    })),
-                    'Purchase_Orders_Export'
-                  )
-                }
-              >
-                <Download className="w-3.5 h-3.5 mr-1.5" /> Export Excel
-              </Button>
+              {/* Quick Action Export & Import */}
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setImportModalType('purchases')}
+                >
+                  <Upload className="w-3.5 h-3.5 mr-1.5 text-sky-500" /> Import Excel
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    exportToExcel(
+                      filteredPOs.map((p) => ({
+                        'PO Number': p.po_number,
+                        Supplier: p.supplier_name,
+                        'Order Date': p.order_date,
+                        'Expected Delivery': p.expected_delivery_date,
+                        'Total Cost': p.total_amount,
+                        Status: p.status,
+                        Notes: p.notes || '',
+                      })),
+                      'Purchase_Orders_Export'
+                    )
+                  }
+                >
+                  <Download className="w-3.5 h-3.5 mr-1.5" /> Export Excel
+                </Button>
+              </div>
             </div>
 
             {/* Filter Toolbar: Search, Status, Supplier, and Date Range */}
@@ -911,6 +927,38 @@ export function SuppliersPage() {
                   <option value="Packaging">Packaging</option>
                   <option value="Chemicals">Chemicals</option>
                 </select>
+
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setImportModalType('suppliers')}
+                  >
+                    <Upload className="w-3.5 h-3.5 mr-1.5 text-sky-500" /> Import Excel
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() =>
+                      exportToExcel(
+                        filteredSuppliers.map((s) => ({
+                          'Supplier Name': s.name,
+                          Category: s.category || s.supplier_type || '',
+                          'Contact Person': s.contact_person || '',
+                          Phone: s.phone,
+                          Email: s.email,
+                          Address: s.address,
+                          'Tax ID': s.tax_id || '',
+                          'Payment Terms': s.payment_terms || '',
+                          Status: s.status || 'active',
+                        })),
+                        'Suppliers_Directory'
+                      )
+                    }
+                  >
+                    <Download className="w-3.5 h-3.5 mr-1.5" /> Export Excel
+                  </Button>
+                </div>
               </div>
             </div>
           </Card>
@@ -1098,6 +1146,13 @@ export function SuppliersPage() {
               </div>
 
               <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setImportModalType('raw_materials')}
+                >
+                  <Upload className="w-3.5 h-3.5 mr-1.5 text-sky-500" /> Import Excel
+                </Button>
                 <Button
                   variant="outline"
                   size="sm"
@@ -2103,6 +2158,24 @@ export function SuppliersPage() {
           </div>
         </form>
       </Modal>
+
+      {/* Excel Import Modal for Suppliers, POs, and Raw Materials */}
+      {importModalType && (
+        <ExcelImportModal
+          isOpen={Boolean(importModalType)}
+          onClose={() => setImportModalType(null)}
+          entityType={importModalType}
+          onImportComplete={async (validRows) => {
+            if (importModalType === 'suppliers' && typeof importSuppliers === 'function') {
+              importSuppliers(validRows);
+            } else if (importModalType === 'purchases' && typeof importPurchases === 'function') {
+              importPurchases(validRows);
+            } else if (importModalType === 'raw_materials' && typeof importRawMaterials === 'function') {
+              importRawMaterials(validRows);
+            }
+          }}
+        />
+      )}
     </div>
   );
 }

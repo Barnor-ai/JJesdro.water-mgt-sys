@@ -1833,11 +1833,85 @@ export function useERPStore() {
 
   const updateExpense = (id: string, updates: Partial<Expense>) => {
     const oldExp = globalState.expenses.find((e) => e.id === id);
+    if (!oldExp) return;
+
+    // Track changed fields for detailed audit log
+    const changedFields: string[] = [];
+    const fieldsToTrack: (keyof Expense)[] = [
+      'category',
+      'description',
+      'amount',
+      'date',
+      'expense_date',
+      'payee',
+      'payment_method',
+      'receipt_number',
+      'reference_number',
+      'notes',
+    ];
+
+    fieldsToTrack.forEach((field) => {
+      if (updates[field] !== undefined && String(updates[field]) !== String(oldExp[field])) {
+        changedFields.push(
+          `${String(field)}: previous "${oldExp[field] ?? '-'}" -> new "${updates[field] ?? '-'}"`
+        );
+      }
+    });
+
+    const updatedExp = { ...oldExp, ...updates };
+
     globalState.expenses = globalState.expenses.map((e) =>
-      e.id === id ? { ...e, ...updates } : e
+      e.id === id ? updatedExp : e
     );
     saveStored('expenses', globalState.expenses);
     saveTableToIndexedDB('expenses', globalState.expenses);
+
+    // Synchronize associated Journal Entries to maintain accounting balance equilibrium
+    if (globalState.journalEntries && globalState.journalEntries.length > 0) {
+      let journalUpdated = false;
+      globalState.journalEntries = globalState.journalEntries.map((je) => {
+        const matchesExpense =
+          je.reference === id ||
+          je.reference === oldExp.expense_number ||
+          (oldExp.receipt_number && je.reference === oldExp.receipt_number);
+
+        if (matchesExpense && updates.amount !== undefined) {
+          journalUpdated = true;
+          const newAmount = Number(updates.amount) || oldExp.amount;
+          const updatedLines = je.lines.map((line) => {
+            if (line.debit > 0) {
+              return {
+                ...line,
+                debit: newAmount,
+                description: updates.description || line.description,
+              };
+            }
+            if (line.credit > 0) {
+              return {
+                ...line,
+                credit: newAmount,
+                description: updates.description || line.description,
+              };
+            }
+            return line;
+          });
+          return {
+            ...je,
+            total_amount: newAmount,
+            description: updates.description
+              ? `Expense: ${updates.description}`
+              : je.description,
+            lines: updatedLines,
+          };
+        }
+        return je;
+      });
+
+      if (journalUpdated) {
+        saveStored('journal_entries', globalState.journalEntries);
+        saveTableToIndexedDB('journalEntries', globalState.journalEntries);
+      }
+    }
 
     enqueueSyncTransaction({
       entity_type: 'expense',
@@ -1846,7 +1920,339 @@ export function useERPStore() {
       payload: updates,
     });
 
-    addAuditLog('UPDATE', 'expenses', id, { old_value: oldExp, new_value: updates });
+    const userFullName = globalState.currentUser?.full_name || 'System User';
+    const auditDetail = `Expense ${oldExp.expense_number || id} edited by ${userFullName}. ${
+      updates.amount !== undefined && updates.amount !== oldExp.amount
+        ? `Amount: Previous ${oldExp.currency || 'GHS'} ${oldExp.amount}, New ${oldExp.currency || 'GHS'} ${updates.amount}. `
+        : ''
+    }Fields changed: ${changedFields.join('; ') || 'details updated'}`;
+
+    addAuditLog('UPDATE', 'expenses', id, {
+      message: auditDetail,
+      expense_number: oldExp.expense_number,
+      previous_amount: oldExp.amount,
+      new_amount: updates.amount ?? oldExp.amount,
+      changed_fields: changedFields,
+      old_value: oldExp,
+      new_value: updates,
+    });
+
+    notify();
+  };
+
+  const importExpenses = (records: any[]) => {
+    if (!Array.isArray(records) || records.length === 0) return;
+    const currentOrgId = globalState.currentOrganization?.id || 'org-default';
+    const currency = globalState.currentOrganization?.currency || 'GHS';
+    const newItems: Expense[] = records.map((r, idx) => ({
+      id: `EXP-${Date.now()}-${idx}`,
+      expense_number: r.receipt_number || `EXP-${new Date().getFullYear()}-${String(globalState.expenses.length + idx + 1).padStart(4, '0')}`,
+      organization_id: currentOrgId,
+      category: r.category || 'Other',
+      description: r.description || 'Imported Expense',
+      amount: Number(r.amount) || 0,
+      currency,
+      date: r.date || new Date().toISOString().slice(0, 10),
+      expense_date: r.date || new Date().toISOString().slice(0, 10),
+      payee: r.payee || 'Vendor',
+      payment_method: r.payment_method || 'Bank Transfer',
+      receipt_number: r.receipt_number || '',
+      notes: r.notes || 'Imported from Excel',
+      recorded_by: globalState.currentUser?.full_name || 'Imported User',
+      approval_status: 'Approved',
+      created_at: new Date().toISOString(),
+    }));
+
+    globalState.expenses = [...newItems, ...globalState.expenses];
+    saveStored('expenses', globalState.expenses);
+    saveTableToIndexedDB('expenses', globalState.expenses);
+
+    newItems.forEach((exp) => {
+      enqueueSyncTransaction({
+        entity_type: 'expense',
+        entity_id: exp.id,
+        action: 'CREATE',
+        payload: exp,
+      });
+    });
+
+    addAuditLog('IMPORT', 'expenses', 'batch', {
+      count: newItems.length,
+      message: `Imported ${newItems.length} expenses from Excel spreadsheet`,
+    });
+    notify();
+  };
+
+  const importCustomers = (records: any[]) => {
+    if (!Array.isArray(records) || records.length === 0) return;
+    const currentOrgId = globalState.currentOrganization?.id || 'org-default';
+    const newCustomers: Customer[] = records.map((r, idx) => ({
+      id: `CUST-${Date.now()}-${idx}`,
+      organization_id: currentOrgId,
+      name: r.name || 'Customer',
+      contact_person: r.contact_person || '',
+      phone: r.phone || '',
+      email: r.email || '',
+      address: r.address || '',
+      type: (r.type as any) || 'Wholesale',
+      tax_id: r.tax_id || '',
+      credit_limit: Number(r.credit_limit) || 0,
+      outstanding_balance: 0,
+      payment_terms: r.payment_terms || 'Cash on Delivery',
+      status: 'Active',
+      is_active: true,
+      created_at: new Date().toISOString(),
+    }));
+
+    globalState.customers = [...globalState.customers, ...newCustomers];
+    saveStored('customers', globalState.customers);
+    saveTableToIndexedDB('customers', globalState.customers);
+
+    newCustomers.forEach((cust) => {
+      enqueueSyncTransaction({
+        entity_type: 'customer',
+        entity_id: cust.id,
+        action: 'CREATE',
+        payload: cust,
+      });
+    });
+
+    addAuditLog('IMPORT', 'customers', 'batch', {
+      count: newCustomers.length,
+      message: `Imported ${newCustomers.length} customers from Excel spreadsheet`,
+    });
+    notify();
+  };
+
+  const importSuppliers = (records: any[]) => {
+    if (!Array.isArray(records) || records.length === 0) return;
+    const currentOrgId = globalState.currentOrganization?.id || 'org-default';
+    const newSuppliers: Supplier[] = records.map((r, idx) => ({
+      id: `SUP-${Date.now()}-${idx}`,
+      organization_id: currentOrgId,
+      name: r.name || 'Supplier',
+      contact_person: r.contact_person || '',
+      phone: r.phone || '',
+      email: r.email || '',
+      address: r.address || '',
+      category: r.category || 'Other',
+      tax_id: r.tax_id || '',
+      payment_terms: r.payment_terms || 'Net 30',
+      status: 'active',
+      created_at: new Date().toISOString(),
+    }));
+
+    globalState.suppliers = [...globalState.suppliers, ...newSuppliers];
+    saveStored('suppliers', globalState.suppliers);
+    saveTableToIndexedDB('suppliers', globalState.suppliers);
+
+    newSuppliers.forEach((sup) => {
+      enqueueSyncTransaction({
+        entity_type: 'supplier',
+        entity_id: sup.id,
+        action: 'CREATE',
+        payload: sup,
+      });
+    });
+
+    addAuditLog('IMPORT', 'suppliers', 'batch', {
+      count: newSuppliers.length,
+      message: `Imported ${newSuppliers.length} suppliers from Excel spreadsheet`,
+    });
+    notify();
+  };
+
+  const importRawMaterials = (records: any[]) => {
+    if (!Array.isArray(records) || records.length === 0) return;
+    const currentOrgId = globalState.currentOrganization?.id || 'org-default';
+    const newMaterials: RawMaterial[] = records.map((r, idx) => ({
+      id: `RM-${Date.now()}-${idx}`,
+      organization_id: currentOrgId,
+      name: r.name || 'Raw Material',
+      sku: r.sku || `RM-${idx + 1}`,
+      category: r.category || 'Bottle',
+      unit: r.unit || 'pcs',
+      cost_per_unit: Number(r.cost_per_unit) || 0.05,
+      current_stock: Number(r.current_stock) || 0,
+      reorder_level: Number(r.reorder_level) || 1000,
+      minimum_stock: Number(r.reorder_level) || 1000,
+      supplier_name: r.supplier_name || '',
+      status: 'active',
+      created_at: new Date().toISOString(),
+    }));
+
+    globalState.rawMaterials = [...globalState.rawMaterials, ...newMaterials];
+    saveStored('raw_materials', globalState.rawMaterials);
+    saveTableToIndexedDB('raw_materials', globalState.rawMaterials);
+
+    newMaterials.forEach((rm) => {
+      enqueueSyncTransaction({
+        entity_type: 'raw_material',
+        entity_id: rm.id,
+        action: 'CREATE',
+        payload: rm,
+      });
+    });
+
+    addAuditLog('IMPORT', 'raw_materials', 'batch', {
+      count: newMaterials.length,
+      message: `Imported ${newMaterials.length} raw materials from Excel spreadsheet`,
+    });
+    notify();
+  };
+
+  const importProducts = (records: any[]) => {
+    if (!Array.isArray(records) || records.length === 0) return;
+    const currentOrgId = globalState.currentOrganization?.id || 'org-default';
+    const newProducts: BottleType[] = records.map((r, idx) => ({
+      id: `BT-${Date.now()}-${idx}`,
+      organization_id: currentOrgId,
+      name: r.name || 'Water Product',
+      size: (r.size as any) || '500ml',
+      selling_price: Number(r.selling_price) || 1.5,
+      wholesale_price: Number(r.wholesale_price) || Number(r.selling_price) * 0.8 || 1.2,
+      cost: Number(r.cost) || 0.35,
+      barcode: r.barcode || `600${Date.now().toString().slice(-8)}${idx}`,
+      created_at: new Date().toISOString(),
+    }));
+
+    globalState.bottleTypes = [...globalState.bottleTypes, ...newProducts];
+    saveStored('bottle_types', globalState.bottleTypes);
+
+    addAuditLog('IMPORT', 'bottle_types', 'batch', {
+      count: newProducts.length,
+      message: `Imported ${newProducts.length} water products from Excel spreadsheet`,
+    });
+    notify();
+  };
+
+  const updateBottleType = (id: string, updates: Partial<BottleType>) => {
+    globalState.bottleTypes = globalState.bottleTypes.map((bt) =>
+      bt.id === id ? { ...bt, ...updates } : bt
+    );
+    saveStored('bottle_types', globalState.bottleTypes);
+    addAuditLog('UPDATE', 'bottle_types', id, { updates });
+    notify();
+  };
+
+  const importPurchases = (records: any[]) => {
+    if (!Array.isArray(records) || records.length === 0) return;
+    const currentOrgId = globalState.currentOrganization?.id || 'org-default';
+    const newPurchases: Purchase[] = records.map((r, idx) => ({
+      id: `PO-${Date.now()}-${idx}`,
+      organization_id: currentOrgId,
+      po_number: r.po_number || `PO-${new Date().getFullYear()}-${String(globalState.purchases.length + idx + 1).padStart(4, '0')}`,
+      supplier_id: 'sup-imported',
+      supplier_name: r.supplier_name || 'Vendor',
+      order_date: r.order_date || new Date().toISOString().slice(0, 10),
+      expected_delivery_date: r.expected_delivery_date || new Date().toISOString().slice(0, 10),
+      subtotal: Number(r.total_amount) || 0,
+      tax: 0,
+      total_amount: Number(r.total_amount) || 0,
+      status: (r.status as any) || 'Ordered',
+      items: [],
+      notes: r.notes || 'Imported Purchase Order',
+      created_by: globalState.currentUser?.full_name || 'System User',
+      created_at: new Date().toISOString(),
+    }));
+
+    globalState.purchases = [...newPurchases, ...globalState.purchases];
+    saveStored('purchases', globalState.purchases);
+    saveTableToIndexedDB('purchases', globalState.purchases);
+
+    newPurchases.forEach((po) => {
+      enqueueSyncTransaction({
+        entity_type: 'purchase',
+        entity_id: po.id,
+        action: 'CREATE',
+        payload: po,
+      });
+    });
+
+    addAuditLog('IMPORT', 'purchases', 'batch', {
+      count: newPurchases.length,
+      message: `Imported ${newPurchases.length} purchase orders from Excel spreadsheet`,
+    });
+    notify();
+  };
+
+  const restoreBackupData = async (data: any) => {
+    if (!data) return;
+    if (data.organization && Object.keys(data.organization).length > 0) {
+      globalState.currentOrganization = { ...globalState.currentOrganization, ...data.organization };
+      saveStored('current_organization', globalState.currentOrganization);
+      saveStored('current_org', globalState.currentOrganization);
+    }
+    if (Array.isArray(data.branches) && data.branches.length > 0) {
+      globalState.branches = data.branches;
+      saveStored('branches', data.branches);
+    }
+    if (Array.isArray(data.bottleTypes) && data.bottleTypes.length > 0) {
+      globalState.bottleTypes = data.bottleTypes;
+      saveStored('bottle_types', data.bottleTypes);
+    }
+    if (Array.isArray(data.customers)) {
+      globalState.customers = data.customers;
+      saveStored('customers', data.customers);
+      saveTableToIndexedDB('customers', data.customers);
+    }
+    if (Array.isArray(data.suppliers)) {
+      globalState.suppliers = data.suppliers;
+      saveStored('suppliers', data.suppliers);
+      saveTableToIndexedDB('suppliers', data.suppliers);
+    }
+    if (Array.isArray(data.rawMaterials)) {
+      globalState.rawMaterials = data.rawMaterials;
+      saveStored('raw_materials', data.rawMaterials);
+      saveTableToIndexedDB('raw_materials', data.rawMaterials);
+    }
+    if (Array.isArray(data.finishedGoods)) {
+      globalState.finishedGoods = data.finishedGoods;
+      saveStored('finished_goods', data.finishedGoods);
+      saveTableToIndexedDB('finished_goods', data.finishedGoods);
+    }
+    if (Array.isArray(data.purchases)) {
+      globalState.purchases = data.purchases;
+      saveStored('purchases', data.purchases);
+      saveTableToIndexedDB('purchases', data.purchases);
+    }
+    if (Array.isArray(data.sales)) {
+      globalState.sales = data.sales;
+      saveStored('sales', data.sales);
+      saveTableToIndexedDB('sales', data.sales);
+    }
+    if (Array.isArray(data.productionBatches)) {
+      globalState.productionBatches = data.productionBatches;
+      saveStored('batches', data.productionBatches);
+      saveTableToIndexedDB('production_batches', data.productionBatches);
+    }
+    if (Array.isArray(data.productionBudgets)) {
+      globalState.productionBudgets = data.productionBudgets;
+      saveStored('production_budgets', data.productionBudgets);
+    }
+    if (Array.isArray(data.expenses)) {
+      globalState.expenses = data.expenses;
+      saveStored('expenses', data.expenses);
+      saveTableToIndexedDB('expenses', data.expenses);
+    }
+    if (Array.isArray(data.machines)) {
+      globalState.machines = data.machines;
+      saveStored('machines', data.machines);
+    }
+    if (Array.isArray(data.journalEntries)) {
+      globalState.journalEntries = data.journalEntries;
+      saveStored('journal_entries', data.journalEntries);
+      saveTableToIndexedDB('journalEntries', data.journalEntries);
+    }
+    if (Array.isArray(data.chartOfAccounts)) {
+      globalState.chartOfAccounts = data.chartOfAccounts;
+      saveStored('chart_of_accounts', data.chartOfAccounts);
+    }
+
+    addAuditLog('RESTORE', 'system', 'backup', {
+      message: 'Workspace restored from H2O business backup archive',
+      restored_at: new Date().toISOString(),
+    });
     notify();
   };
 
@@ -2989,6 +3395,14 @@ export function useERPStore() {
     addExpense,
     updateExpense,
     deleteExpense,
+    importExpenses,
+    importCustomers,
+    importSuppliers,
+    importRawMaterials,
+    importProducts,
+    importPurchases,
+    updateBottleType,
+    restoreBackupData,
     addCustomExpenseCategory,
     voidSale,
     deleteSale,

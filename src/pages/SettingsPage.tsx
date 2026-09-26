@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Building2,
   Shield,
@@ -21,6 +22,8 @@ import {
   Layers,
   FileText,
   Clock,
+  Calculator,
+  ArrowRight,
 } from 'lucide-react';
 import { useERPStore } from '../store/useStore';
 import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/Card';
@@ -41,12 +44,14 @@ import { DocumentHeader, DocumentFooter } from '../components/common/DocumentHea
 type SettingsTab =
   | 'company'
   | 'regional'
+  | 'costing'
   | 'branding'
   | 'plants'
   | 'security'
   | 'admin';
 
 export function SettingsPage() {
+  const navigate = useNavigate();
   const {
     branches,
     bottleTypes,
@@ -59,6 +64,7 @@ export function SettingsPage() {
     setUpgradeModalOpen,
     updateSupabasePassword,
     updateOrganization,
+    updateBottleType,
     sessionTimeoutMinutes,
     setSessionTimeoutMinutes,
   } = useERPStore();
@@ -73,10 +79,10 @@ export function SettingsPage() {
   // Determine allowed tabs based on role
   const allowedTabs: SettingsTab[] = React.useMemo(() => {
     if (isOwnerOrAdmin) {
-      return ['company', 'regional', 'branding', 'plants', 'security', 'admin'];
+      return ['company', 'regional', 'costing', 'branding', 'plants', 'security', 'admin'];
     }
     if (isAccountant) {
-      return ['regional', 'security'];
+      return ['regional', 'costing', 'security'];
     }
     return ['security'];
   }, [isOwnerOrAdmin, isAccountant]);
@@ -131,6 +137,20 @@ export function SettingsPage() {
     'Goods received in good condition are not returnable without prior QA authorization. Thank you for your business.'
   );
   const [savedSuccess, setSavedSuccess] = useState(false);
+
+  // Production Unit Costing State
+  const [selectedCostBottleId, setSelectedCostBottleId] = useState<string>(
+    bottleTypes[0]?.id || 'bt-500'
+  );
+  const [waterFiltrationCost, setWaterFiltrationCost] = useState(0.03);
+  const [preformCost, setPreformCost] = useState(0.08);
+  const [capCost, setCapCost] = useState(0.03);
+  const [labelCost, setLabelCost] = useState(0.02);
+  const [packagingFilmCost, setPackagingFilmCost] = useState(0.03);
+  const [energyDieselCost, setEnergyDieselCost] = useState(0.04);
+  const [directLaborCost, setDirectLaborCost] = useState(0.04);
+  const [machineMaintenanceCost, setMachineMaintenanceCost] = useState(0.03);
+  const [costSaveSuccess, setCostSaveSuccess] = useState(false);
 
   // Synchronize state when organization updates
   useEffect(() => {
@@ -216,45 +236,14 @@ export function SettingsPage() {
     setTimeout(() => setSavedSuccess(false), 3000);
   };
 
-  const handleExportBackup = () => {
-    const storeObj = useERPStore as any;
-    const state = typeof storeObj.getState === 'function' ? storeObj.getState() : {};
-    const backupData = {
-      version: '2.0.0',
-      exported_at: new Date().toISOString(),
-      organization: state.currentOrganization || currentOrganization,
-      branches: state.branches || branches,
-      bottleTypes: state.bottleTypes || bottleTypes,
-      sales: state.sales || [],
-      expenses: state.expenses || [],
-      purchases: state.purchases || [],
-      customers: state.customers || [],
-      suppliers: state.suppliers || [],
-      productionBatches: state.productionBatches || [],
-      finishedGoods: state.finishedGoods || [],
-      rawMaterials: state.rawMaterials || [],
-    };
-    const dataStr =
-      'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(backupData, null, 2));
-    const downloadAnchor = document.createElement('a');
-    downloadAnchor.setAttribute('href', dataStr);
-    const safeName = (companyName || 'Company').replace(/[^a-zA-Z0-9]/g, '_');
-    downloadAnchor.setAttribute(
-      'download',
-      `${safeName}_Enterprise_Backup_${new Date().toISOString().slice(0, 10)}.json`
-    );
-    document.body.appendChild(downloadAnchor);
-    downloadAnchor.click();
-    downloadAnchor.remove();
-  };
-
   const tabsConfig: Array<{ id: SettingsTab; label: string; icon: React.ReactNode }> = [
     { id: 'company', label: 'Company Profile', icon: <Building2 className="w-4 h-4" /> },
     { id: 'regional', label: 'Regional & Financial', icon: <Globe2 className="w-4 h-4" /> },
+    { id: 'costing', label: 'Production Unit Costing', icon: <Calculator className="w-4 h-4" /> },
     { id: 'branding', label: 'Document & Invoice Branding', icon: <Receipt className="w-4 h-4" /> },
     { id: 'plants', label: 'Plants & Facilities', icon: <Factory className="w-4 h-4" /> },
     { id: 'security', label: 'Security & Credentials', icon: <Shield className="w-4 h-4" /> },
-    { id: 'admin', label: 'Administration & Data Backup', icon: <Lock className="w-4 h-4" /> },
+    { id: 'admin', label: 'Administration & Policies', icon: <Lock className="w-4 h-4" /> },
   ];
 
   return (
@@ -528,6 +517,280 @@ export function SettingsPage() {
             </CardContent>
           </Card>
         </form>
+      )}
+
+      {/* Tab: PRODUCTION UNIT COSTING CONFIGURATION */}
+      {activeTab === 'costing' && (
+        <div className="space-y-6">
+          <Card>
+            <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <Calculator className="w-5 h-5 text-sky-500" />
+                  <CardTitle>Production Unit Costing & Bill of Materials Breakdown</CardTitle>
+                </div>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Configure direct manufacturing cost components, water treatment, preforms, packaging, and labor per bottle size
+                </p>
+              </div>
+
+              {costSaveSuccess && (
+                <span className="text-xs text-emerald-600 dark:text-emerald-400 font-bold flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
+                  <CheckCircle2 className="w-4 h-4" /> Standard Costs Synchronized
+                </span>
+              )}
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {/* Product Size Selector */}
+              <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-900 dark:text-white mb-1">
+                    Select Finished Water Product Size
+                  </label>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    Calculates bill of materials unit cost and updates default product valuation
+                  </p>
+                </div>
+                <div className="w-full sm:w-72">
+                  <select
+                    value={selectedCostBottleId}
+                    onChange={(e) => {
+                      const id = e.target.value;
+                      setSelectedCostBottleId(id);
+                      const prod = bottleTypes.find((b) => b.id === id);
+                      if (prod && prod.cost > 0) {
+                        const baseCost = prod.cost;
+                        setWaterFiltrationCost(Number((baseCost * 0.12).toFixed(3)));
+                        setPreformCost(Number((baseCost * 0.32).toFixed(3)));
+                        setCapCost(Number((baseCost * 0.10).toFixed(3)));
+                        setLabelCost(Number((baseCost * 0.08).toFixed(3)));
+                        setPackagingFilmCost(Number((baseCost * 0.10).toFixed(3)));
+                        setEnergyDieselCost(Number((baseCost * 0.12).toFixed(3)));
+                        setDirectLaborCost(Number((baseCost * 0.10).toFixed(3)));
+                        setMachineMaintenanceCost(Number((baseCost * 0.06).toFixed(3)));
+                      }
+                    }}
+                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-semibold focus:outline-none focus:ring-2 focus:ring-sky-500"
+                  >
+                    {bottleTypes.map((bt) => (
+                      <option key={bt.id} value={bt.id}>
+                        {bt.size} — {bt.name} ({currency} {bt.cost.toFixed(2)} cost)
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* 8 Configurable Cost Components */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-700/80 bg-white dark:bg-slate-900 space-y-1.5">
+                  <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 block">
+                    1. Water Treatment & Chemicals
+                  </label>
+                  <Input
+                    type="number"
+                    step="0.001"
+                    min="0"
+                    value={waterFiltrationCost}
+                    onChange={(e) => setWaterFiltrationCost(Number(e.target.value))}
+                  />
+                  <p className="text-[10px] text-slate-400">Chlorination, filtration & mineral dosing</p>
+                </div>
+
+                <div className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-700/80 bg-white dark:bg-slate-900 space-y-1.5">
+                  <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 block">
+                    2. Bottle Preform / Resin
+                  </label>
+                  <Input
+                    type="number"
+                    step="0.001"
+                    min="0"
+                    value={preformCost}
+                    onChange={(e) => setPreformCost(Number(e.target.value))}
+                  />
+                  <p className="text-[10px] text-slate-400">Raw preform plastic unit cost</p>
+                </div>
+
+                <div className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-700/80 bg-white dark:bg-slate-900 space-y-1.5">
+                  <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 block">
+                    3. Cap & Tamper Seal
+                  </label>
+                  <Input
+                    type="number"
+                    step="0.001"
+                    min="0"
+                    value={capCost}
+                    onChange={(e) => setCapCost(Number(e.target.value))}
+                  />
+                  <p className="text-[10px] text-slate-400">Bottle cap closure & safety ring</p>
+                </div>
+
+                <div className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-700/80 bg-white dark:bg-slate-900 space-y-1.5">
+                  <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 block">
+                    4. Label & Adhesive
+                  </label>
+                  <Input
+                    type="number"
+                    step="0.001"
+                    min="0"
+                    value={labelCost}
+                    onChange={(e) => setLabelCost(Number(e.target.value))}
+                  />
+                  <p className="text-[10px] text-slate-400">OPP roll label / heat shrink sleeve</p>
+                </div>
+
+                <div className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-700/80 bg-white dark:bg-slate-900 space-y-1.5">
+                  <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 block">
+                    5. Outer Packaging Film
+                  </label>
+                  <Input
+                    type="number"
+                    step="0.001"
+                    min="0"
+                    value={packagingFilmCost}
+                    onChange={(e) => setPackagingFilmCost(Number(e.target.value))}
+                  />
+                  <p className="text-[10px] text-slate-400">LDPE bundling film per bottle</p>
+                </div>
+
+                <div className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-700/80 bg-white dark:bg-slate-900 space-y-1.5">
+                  <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 block">
+                    6. Electricity & Generator Diesel
+                  </label>
+                  <Input
+                    type="number"
+                    step="0.001"
+                    min="0"
+                    value={energyDieselCost}
+                    onChange={(e) => setEnergyDieselCost(Number(e.target.value))}
+                  />
+                  <p className="text-[10px] text-slate-400">Compressor & blow molding power</p>
+                </div>
+
+                <div className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-700/80 bg-white dark:bg-slate-900 space-y-1.5">
+                  <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 block">
+                    7. Direct Plant Labor
+                  </label>
+                  <Input
+                    type="number"
+                    step="0.001"
+                    min="0"
+                    value={directLaborCost}
+                    onChange={(e) => setDirectLaborCost(Number(e.target.value))}
+                  />
+                  <p className="text-[10px] text-slate-400">Machine operators & line packers</p>
+                </div>
+
+                <div className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-700/80 bg-white dark:bg-slate-900 space-y-1.5">
+                  <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 block">
+                    8. Machine Wear & Maintenance
+                  </label>
+                  <Input
+                    type="number"
+                    step="0.001"
+                    min="0"
+                    value={machineMaintenanceCost}
+                    onChange={(e) => setMachineMaintenanceCost(Number(e.target.value))}
+                  />
+                  <p className="text-[10px] text-slate-400">Spare parts & lubricant allowance</p>
+                </div>
+              </div>
+
+              {/* Total Unit Cost Summary & Live Gross Margin Indicator */}
+              {(() => {
+                const totalUnitCost =
+                  Number(waterFiltrationCost) +
+                  Number(preformCost) +
+                  Number(capCost) +
+                  Number(labelCost) +
+                  Number(packagingFilmCost) +
+                  Number(energyDieselCost) +
+                  Number(directLaborCost) +
+                  Number(machineMaintenanceCost);
+
+                const currentProd = bottleTypes.find((b) => b.id === selectedCostBottleId) || bottleTypes[0];
+                const retailPrice = currentProd?.selling_price || 1.5;
+                const wholesalePrice = currentProd?.wholesale_price || 1.1;
+
+                const grossProfitRetail = Math.max(0, retailPrice - totalUnitCost);
+                const retailMarginPercent = retailPrice > 0 ? (grossProfitRetail / retailPrice) * 100 : 0;
+
+                const grossProfitWholesale = Math.max(0, wholesalePrice - totalUnitCost);
+                const wholesaleMarginPercent = wholesalePrice > 0 ? (grossProfitWholesale / wholesalePrice) * 100 : 0;
+
+                return (
+                  <div className="p-5 rounded-2xl bg-slate-900 text-white space-y-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-800">
+                      <div>
+                        <span className="text-xs uppercase tracking-wider text-sky-400 font-bold">
+                          Calculated Standard Unit Production Cost
+                        </span>
+                        <div className="text-3xl font-black font-mono text-white mt-1">
+                          {currency} {totalUnitCost.toFixed(3)}{' '}
+                          <span className="text-xs font-normal text-slate-400">/ bottle</span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-3">
+                        <Button
+                          variant="primary"
+                          size="sm"
+                          onClick={() => {
+                            if (typeof updateBottleType === 'function' && currentProd) {
+                              updateBottleType(currentProd.id, {
+                                cost: Number(totalUnitCost.toFixed(2)),
+                              });
+                            }
+                            setCostSaveSuccess(true);
+                            setTimeout(() => setCostSaveSuccess(false), 3000);
+                          }}
+                        >
+                          <Save className="w-4 h-4 mr-1.5" /> Save Standard Unit Cost
+                        </Button>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs font-medium">
+                      <div className="p-3.5 rounded-xl bg-slate-800/80 border border-slate-700/80 flex items-center justify-between">
+                        <div>
+                          <span className="text-slate-400 text-[11px] block">Wholesale Margin</span>
+                          <span className="text-white font-bold">
+                            Selling Price: {currency} {wholesalePrice.toFixed(2)}
+                          </span>
+                        </div>
+                        <div className="text-right">
+                          <span className="text-emerald-400 font-bold text-base font-mono block">
+                            +{wholesaleMarginPercent.toFixed(1)}%
+                          </span>
+                          <span className="text-slate-400 text-[10px]">
+                            Profit: {currency} {grossProfitWholesale.toFixed(2)} / unit
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="p-3.5 rounded-xl bg-slate-800/80 border border-slate-700/80 flex items-center justify-between">
+                        <div>
+                          <span className="text-slate-400 text-[11px] block">Retail Margin</span>
+                          <span className="text-white font-bold">
+                            Selling Price: {currency} {retailPrice.toFixed(2)}
+                          </span>
+                        </div>
+                        <div className="text-right">
+                          <span className="text-sky-400 font-bold text-base font-mono block">
+                            +{retailMarginPercent.toFixed(1)}%
+                          </span>
+                          <span className="text-slate-400 text-[10px]">
+                            Profit: {currency} {grossProfitRetail.toFixed(2)} / unit
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+            </CardContent>
+          </Card>
+        </div>
       )}
 
       {/* Tab 3: DOCUMENT & INVOICE BRANDING (Owner / Admin) */}
@@ -880,56 +1143,36 @@ export function SettingsPage() {
         </div>
       )}
 
-      {/* Tab 6: ADMINISTRATION & DATA BACKUP (Owner / Admin Only) */}
+      {/* Tab: ADMINISTRATION & POLICIES (Owner / Admin Only) */}
       {activeTab === 'admin' && isOwnerOrAdmin && (
         <div className="space-y-6">
           <Card>
             <CardHeader>
               <div className="flex items-center gap-2">
-                <Lock className="w-4 h-4 text-sky-500" />
-                <CardTitle>Enterprise Administration & Data Archival</CardTitle>
+                <Database className="w-4 h-4 text-sky-500" />
+                <CardTitle>Company Data Backup & Disaster Recovery</CardTitle>
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Authorized administrator data controls and local workspace maintenance
+                Authorized administrator data protection, local backups, and workspace recovery
               </p>
             </CardHeader>
-            <CardContent className="space-y-5">
-              {/* Backup Card: Completely hidden from normal users; only available internally for system owner/super administrator */}
-              {isSystemOwnerOrSuperAdmin && (
-                <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/80 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                  <div>
-                    <h4 className="text-xs font-bold text-slate-900 dark:text-white">
-                      Complete Enterprise Data Snapshot
-                    </h4>
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
-                      Download complete encrypted JSON archive of all batches, sales, expenses, inventory, and customer records.
-                    </p>
-                  </div>
-                  <Button variant="primary" size="sm" onClick={handleExportBackup} className="shrink-0">
-                    <Download className="w-4 h-4 mr-1.5" /> Download Enterprise Backup (.json)
-                  </Button>
-                </div>
-              )}
-
-              {/* Workspace Maintenance Card */}
+            <CardContent>
               <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/80 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
                   <h4 className="text-xs font-bold text-slate-900 dark:text-white">
-                    Offline Cache & Storage Health
+                    Dedicated Backup & Restore Center
                   </h4>
                   <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
-                    Re-indexes local client tables and ensures browser database equilibrium.
+                    Create structured company backups (.h2obackup), choose your local download destination, verify archives, and restore workspace records.
                   </p>
                 </div>
                 <Button
-                  variant="outline"
+                  variant="primary"
                   size="sm"
-                  onClick={() => {
-                    alert('Local workspace cache verified and healthy.');
-                  }}
+                  onClick={() => navigate('/backup')}
                   className="shrink-0"
                 >
-                  <RefreshCw className="w-4 h-4 mr-1.5" /> Verify Storage Equilibrium
+                  <Database className="w-4 h-4 mr-1.5" /> Open Backup & Restore
                 </Button>
               </div>
             </CardContent>

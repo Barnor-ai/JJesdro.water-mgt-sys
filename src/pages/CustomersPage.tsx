@@ -19,6 +19,7 @@ import {
   CheckCircle2,
   Clock,
   ShieldAlert,
+  Upload,
 } from 'lucide-react';
 import { useERPStore } from '../store/useStore';
 import { Customer, CustomerType } from '../types/database';
@@ -30,6 +31,7 @@ import { Modal } from '../components/ui/Modal';
 import { ConfirmDialog } from '../components/ui/ConfirmDialog';
 import { formatCurrency, formatDate } from '../lib/utils';
 import { exportToExcel } from '../lib/exportUtils';
+import { ExcelImportModal } from '../components/common/ExcelImportModal';
 
 export function CustomersPage() {
   const {
@@ -39,9 +41,12 @@ export function CustomersPage() {
     updateCustomer,
     toggleCustomerStatus,
     deleteCustomer,
+    importCustomers,
     recordPayment,
     currentUser,
   } = useERPStore();
+
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
 
   // Modals state
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -272,6 +277,13 @@ export function CustomersPage() {
         </div>
 
         <div className="flex items-center gap-2.5">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setIsImportModalOpen(true)}
+          >
+            <Upload className="w-4 h-4 mr-1.5 text-sky-500" /> Import from Excel
+          </Button>
           <Button
             variant="outline"
             size="sm"
@@ -1033,6 +1045,20 @@ export function CustomersPage() {
           </div>
         </form>
       </Modal>
+
+      {/* Excel Import Modal */}
+      {isImportModalOpen && (
+        <ExcelImportModal
+          isOpen={isImportModalOpen}
+          onClose={() => setIsImportModalOpen(false)}
+          entityType="customers"
+          onImportComplete={async (validRows) => {
+            if (typeof importCustomers === 'function') {
+              importCustomers(validRows);
+            }
+          }}
+        />
+      )}
     </div>
   );
 }

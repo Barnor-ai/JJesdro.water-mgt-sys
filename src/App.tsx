@@ -21,6 +21,7 @@ import { MachinesPage } from './pages/MachinesPage';
 import { UsersPage } from './pages/UsersPage';
 import { AuditLogsPage } from './pages/AuditLogsPage';
 import { SettingsPage } from './pages/SettingsPage';
+import { BackupRestorePage } from './pages/BackupRestorePage';
 import { BillingPage } from './pages/BillingPage';
 import { ApprovalsPage } from './pages/ApprovalsPage';
 import { UpdatePasswordPage } from './pages/UpdatePasswordPage';
@@ -64,6 +65,7 @@ function AppRoutes() {
         <Route path="/approvals" element={<ApprovalsPage />} />
         <Route path="/billing" element={<BillingPage />} />
         <Route path="/audit-logs" element={<AuditLogsPage />} />
+        <Route path="/backup" element={<BackupRestorePage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

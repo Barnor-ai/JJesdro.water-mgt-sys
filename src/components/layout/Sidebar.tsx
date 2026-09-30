@@ -252,6 +252,14 @@ export function Sidebar({
       group: 'admin',
     },
     {
+      name: 'Role Testing',
+      href: '/role-testing',
+      icon: Shield,
+      roles: ['owner', 'super_admin'],
+      badge: 'DEV',
+      group: 'admin',
+    },
+    {
       name: 'Plan & Billing',
       href: '/billing',
       icon: CreditCard,

@@ -48,7 +48,8 @@ type SettingsTab =
   | 'branding'
   | 'plants'
   | 'security'
-  | 'admin';
+  | 'admin'
+  | 'role_testing';
 
 export function SettingsPage() {
   const navigate = useNavigate();
@@ -78,6 +79,9 @@ export function SettingsPage() {
 
   // Determine allowed tabs based on role
   const allowedTabs: SettingsTab[] = React.useMemo(() => {
+    if (isSystemOwnerOrSuperAdmin) {
+      return ['company', 'regional', 'costing', 'branding', 'plants', 'security', 'admin', 'role_testing'];
+    }
     if (isOwnerOrAdmin) {
       return ['company', 'regional', 'costing', 'branding', 'plants', 'security', 'admin'];
     }
@@ -85,7 +89,7 @@ export function SettingsPage() {
       return ['regional', 'costing', 'security'];
     }
     return ['security'];
-  }, [isOwnerOrAdmin, isAccountant]);
+  }, [isSystemOwnerOrSuperAdmin, isOwnerOrAdmin, isAccountant]);
 
   const [activeTab, setActiveTab] = useState<SettingsTab>(allowedTabs[0]);
 
@@ -244,6 +248,7 @@ export function SettingsPage() {
     { id: 'plants', label: 'Plants & Facilities', icon: <Factory className="w-4 h-4" /> },
     { id: 'security', label: 'Security & Credentials', icon: <Shield className="w-4 h-4" /> },
     { id: 'admin', label: 'Administration & Policies', icon: <Lock className="w-4 h-4" /> },
+    { id: 'role_testing', label: 'Role Testing', icon: <Shield className="w-4 h-4 text-amber-500" /> },
   ];
 
   return (
@@ -1218,6 +1223,104 @@ export function SettingsPage() {
                     <option value={120}>120 minutes</option>
                     <option value={0}>Never</option>
                   </select>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Role Testing Card (Strictly visible ONLY to Owner - Requirement 7) */}
+          {isSystemOwnerOrSuperAdmin && (
+            <Card className="border-amber-500/30">
+              <CardHeader>
+                <div className="flex items-center gap-2">
+                  <Shield className="w-4 h-4 text-amber-500" />
+                  <CardTitle>Role Testing & RBAC Verification</CardTitle>
+                </div>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Dedicated operational test accounts for Production Manager, Warehouse Manager, Sales Manager, Accountant, and Auditor
+                </p>
+              </CardHeader>
+              <CardContent>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-xl bg-amber-50/50 dark:bg-amber-950/20 border border-amber-500/30">
+                  <div>
+                    <h4 className="text-xs font-bold text-slate-900 dark:text-white">
+                      Development Role Testing Center
+                    </h4>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                      Verify what each operational role sees using real Supabase Auth accounts without invitation emails or localStorage tampering.
+                    </p>
+                  </div>
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    onClick={() => navigate('/role-testing')}
+                    className="shrink-0 bg-amber-600 hover:bg-amber-700 text-white font-semibold"
+                  >
+                    <Shield className="w-4 h-4 mr-1.5" /> Open Role Testing
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </div>
+      )}
+
+      {/* Tab: ROLE TESTING (Owner Only - Requirement 7 & 8) */}
+      {activeTab === 'role_testing' && isSystemOwnerOrSuperAdmin && (
+        <div className="space-y-6">
+          <Card className="border-amber-500/30">
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="p-2 rounded-xl bg-amber-500/10 text-amber-500">
+                      <Shield className="w-5 h-5" />
+                    </span>
+                    <CardTitle className="text-xl font-black">Role Testing</CardTitle>
+                    <Badge variant="warning" size="sm" className="font-mono text-[10px]">
+                      DEVELOPMENT ONLY
+                    </Badge>
+                  </div>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Use dedicated test accounts to verify role-based access and portal visibility.
+                  </p>
+                </div>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={() => navigate('/role-testing')}
+                  className="bg-amber-600 hover:bg-amber-700 text-white font-semibold"
+                >
+                  <ArrowRight className="w-4 h-4 mr-1.5" /> Open Full Role Testing Center
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/80 text-xs space-y-2">
+                <span className="font-bold text-slate-900 dark:text-white block">
+                  Configured Operational Test Roles:
+                </span>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2 pt-1">
+                  <div className="p-2.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+                    <span className="font-bold text-slate-800 dark:text-slate-200 block">Production Manager</span>
+                    <span className="text-[11px] text-sky-600 dark:text-sky-400 font-mono">production.test@example.com</span>
+                  </div>
+                  <div className="p-2.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+                    <span className="font-bold text-slate-800 dark:text-slate-200 block">Warehouse Manager</span>
+                    <span className="text-[11px] text-sky-600 dark:text-sky-400 font-mono">warehouse.test@example.com</span>
+                  </div>
+                  <div className="p-2.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+                    <span className="font-bold text-slate-800 dark:text-slate-200 block">Sales Manager</span>
+                    <span className="text-[11px] text-sky-600 dark:text-sky-400 font-mono">sales.test@example.com</span>
+                  </div>
+                  <div className="p-2.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+                    <span className="font-bold text-slate-800 dark:text-slate-200 block">Accountant</span>
+                    <span className="text-[11px] text-sky-600 dark:text-sky-400 font-mono">finance.test@example.com</span>
+                  </div>
+                  <div className="p-2.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+                    <span className="font-bold text-slate-800 dark:text-slate-200 block">Auditor</span>
+                    <span className="text-[11px] text-sky-600 dark:text-sky-400 font-mono">auditor.test@example.com</span>
+                  </div>
                 </div>
               </div>
             </CardContent>

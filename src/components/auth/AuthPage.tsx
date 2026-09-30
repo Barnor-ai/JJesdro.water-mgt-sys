@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import {
   Droplet,
   Eye,
@@ -65,10 +66,12 @@ export function AuthPage() {
   const [ownerEmail, setOwnerEmail] = useState('');
   const [ownerPassword, setOwnerPassword] = useState('');
 
+  const location = useLocation();
+
   // Check URL query parameters, path or hash on mount
   useEffect(() => {
     const hash = window.location.hash || '';
-    const searchParams = new URLSearchParams(window.location.search);
+    const searchParams = new URLSearchParams(location.search || window.location.search);
     const pathMatch = window.location.pathname.match(/\/invite\/([^/?#]+)/);
     const pathToken = pathMatch ? pathMatch[1] : null;
     const queryToken = searchParams.get('token');
@@ -91,8 +94,14 @@ export function AuthPage() {
           });
         }
       }
+    } else {
+      const queryEmail = searchParams.get('email');
+      if (queryEmail) {
+        setEmail(queryEmail.trim().toLowerCase());
+        setPassword('');
+      }
     }
-  }, [invitations]);
+  }, [invitations, location.search]);
 
   // Fill default owner credentials
   const handleQuickFillOwner = () => {
@@ -383,6 +392,24 @@ export function AuthPage() {
                   Quick Fill
                 </button>
               </div>
+
+              {/* Test account banner if test email pre-filled */}
+              {email.toLowerCase().includes('.test@example.com') && (
+                <div className="p-3 rounded-xl bg-amber-500/15 border border-amber-500/40 text-amber-900 shadow-xs flex items-center justify-between gap-3 text-xs animate-in fade-in">
+                  <div className="min-w-0">
+                    <div className="font-bold flex items-center gap-1.5 text-amber-950">
+                      <ShieldCheck className="w-4 h-4 text-amber-600 shrink-0" />
+                      Operational Role Testing Account
+                    </div>
+                    <div className="text-[11px] text-amber-800 font-mono truncate mt-0.5">
+                      {email} &bull; Authenticate with your test password
+                    </div>
+                  </div>
+                  <span className="px-2 py-0.5 rounded bg-amber-200 text-amber-900 font-bold text-[10px] uppercase shrink-0">
+                    Role Test
+                  </span>
+                </div>
+              )}
 
               <form onSubmit={handleSignIn} className="space-y-4">
                 <div>

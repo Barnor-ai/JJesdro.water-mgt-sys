@@ -20,6 +20,7 @@ import { ExpensesPage } from './pages/ExpensesPage';
 import { ReportsPage } from './pages/ReportsPage';
 import { MachinesPage } from './pages/MachinesPage';
 import { UsersPage } from './pages/UsersPage';
+import { RoleTestingPage } from './pages/RoleTestingPage';
 import { AuditLogsPage } from './pages/AuditLogsPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { BackupRestorePage } from './pages/BackupRestorePage';
@@ -65,6 +66,7 @@ function AppRoutes() {
         <Route path="/expenses" element={<ExpensesPage />} />
         <Route path="/reports" element={<ReportsPage />} />
         <Route path="/users" element={<UsersPage />} />
+        <Route path="/role-testing" element={<RoleTestingPage />} />
         <Route path="/approvals" element={<ApprovalsPage />} />
         <Route path="/billing" element={<BillingPage />} />
         <Route path="/audit-logs" element={<AuditLogsPage />} />

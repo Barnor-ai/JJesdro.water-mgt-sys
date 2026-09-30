@@ -117,13 +117,15 @@ export function formatSupabaseError(error: any): string {
     return 'Supabase configuration is missing. Please configure VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY.';
   }
 
-  // Network / Connection
+  // Network / Connection / Unavailable
   if (
     message.includes('Failed to fetch') ||
     message.includes('NetworkError') ||
+    message.includes('fetch failed') ||
+    message.includes('FunctionsFetchError') ||
     code === 'ECONNREFUSED'
   ) {
-    return 'Unable to connect to the server. Please check your internet connection.';
+    return 'Cloud database connection is currently unavailable. Operating in local workspace mode.';
   }
 
   // Auth credential failure

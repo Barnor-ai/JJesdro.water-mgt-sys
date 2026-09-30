@@ -17,5 +17,8 @@ additional_redirect_urls = [
 [functions.invite-user]
 verify_jwt = true
 
+[functions.manage-test-users]
+verify_jwt = true
+
 [functions.paystack-webhook]
 verify_jwt = false

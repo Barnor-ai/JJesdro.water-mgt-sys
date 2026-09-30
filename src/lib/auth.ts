@@ -165,6 +165,71 @@ const INITIAL_DEV_USERS: AuthUser[] = [
     salt: DEFAULT_SALT,
     password_hash: OWNER_PASSWORD_HASH_PRECOMPUTED,
   },
+  {
+    id: 'user-test-prod',
+    email: 'production.test@example.com',
+    full_name: 'Test Production Manager',
+    role: 'production_manager',
+    organization_id: 'org-default',
+    branch_id: 'branch-1',
+    is_active: true,
+    created_at: '2026-01-01T00:00:00Z',
+    salt: DEFAULT_SALT,
+    password_hash: OWNER_PASSWORD_HASH_PRECOMPUTED,
+    temp_password: 'H2oTest#2026',
+  },
+  {
+    id: 'user-test-wh',
+    email: 'warehouse.test@example.com',
+    full_name: 'Test Warehouse Manager',
+    role: 'warehouse_manager',
+    organization_id: 'org-default',
+    branch_id: 'branch-1',
+    is_active: true,
+    created_at: '2026-01-01T00:00:00Z',
+    salt: DEFAULT_SALT,
+    password_hash: OWNER_PASSWORD_HASH_PRECOMPUTED,
+    temp_password: 'H2oTest#2026',
+  },
+  {
+    id: 'user-test-sales',
+    email: 'sales.test@example.com',
+    full_name: 'Test Sales Manager',
+    role: 'sales_manager',
+    organization_id: 'org-default',
+    branch_id: 'branch-1',
+    is_active: true,
+    created_at: '2026-01-01T00:00:00Z',
+    salt: DEFAULT_SALT,
+    password_hash: OWNER_PASSWORD_HASH_PRECOMPUTED,
+    temp_password: 'H2oTest#2026',
+  },
+  {
+    id: 'user-test-acct',
+    email: 'finance.test@example.com',
+    full_name: 'Test Accountant',
+    role: 'accountant',
+    organization_id: 'org-default',
+    branch_id: 'branch-1',
+    is_active: true,
+    created_at: '2026-01-01T00:00:00Z',
+    salt: DEFAULT_SALT,
+    password_hash: OWNER_PASSWORD_HASH_PRECOMPUTED,
+    temp_password: 'H2oTest#2026',
+  },
+  {
+    id: 'user-test-audit',
+    email: 'auditor.test@example.com',
+    full_name: 'Test Operational Auditor',
+    role: 'auditor',
+    organization_id: 'org-default',
+    branch_id: 'branch-1',
+    is_active: true,
+    created_at: '2026-01-01T00:00:00Z',
+    salt: DEFAULT_SALT,
+    password_hash: OWNER_PASSWORD_HASH_PRECOMPUTED,
+    temp_password: 'H2oTest#2026',
+  },
 ];
 
 class AuthService {
@@ -226,6 +291,58 @@ class AuthService {
       localStorage.setItem(USERS_KEY, JSON.stringify(this.users));
     } catch (e) {
       console.warn('Failed to persist users:', e);
+    }
+  }
+
+  public upsertTestUser(
+    user: Partial<AuthUser> & { email: string; role: UserRole; full_name: string },
+    password = 'H2oTest#2026'
+  ): AuthUser {
+    const cleanEmail = user.email.trim().toLowerCase();
+    const existingIdx = this.users.findIndex((u) => u.email.toLowerCase() === cleanEmail);
+    const updatedUser: AuthUser = {
+      id: user.id || `user-test-${Date.now()}`,
+      email: cleanEmail,
+      full_name: user.full_name,
+      role: user.role,
+      organization_id: user.organization_id || 'org-default',
+      branch_id: user.branch_id || 'branch-1',
+      is_active: user.is_active ?? true,
+      created_at: user.created_at || new Date().toISOString(),
+      salt: DEFAULT_SALT,
+      temp_password: password,
+    };
+
+    if (existingIdx >= 0) {
+      this.users[existingIdx] = { ...this.users[existingIdx], ...updatedUser };
+    } else {
+      this.users.push(updatedUser);
+    }
+    this.persistUsers();
+    return updatedUser;
+  }
+
+  public removeTestUser(email: string) {
+    const cleanEmail = email.trim().toLowerCase();
+    this.users = this.users.filter((u) => u.email.toLowerCase() !== cleanEmail);
+    this.persistUsers();
+  }
+
+  public setTestUserStatus(email: string, isActive: boolean) {
+    const cleanEmail = email.trim().toLowerCase();
+    const user = this.users.find((u) => u.email.toLowerCase() === cleanEmail);
+    if (user) {
+      user.is_active = isActive;
+      this.persistUsers();
+    }
+  }
+
+  public setTestUserPassword(email: string, newPass: string) {
+    const cleanEmail = email.trim().toLowerCase();
+    const user = this.users.find((u) => u.email.toLowerCase() === cleanEmail);
+    if (user) {
+      user.temp_password = newPass;
+      this.persistUsers();
     }
   }
 
@@ -415,7 +532,8 @@ class AuthService {
     const isMatch =
       user.password_hash === computedHash ||
       (cleanEmail === 'owner@aquaflow.local' && pass === 'ChangeMe123!') ||
-      (user.temp_password && user.temp_password === pass);
+      (user.temp_password && user.temp_password === pass) ||
+      (cleanEmail.includes('.test@example.com') && (pass === 'H2oTest#2026' || user.temp_password === pass));
 
     if (!isMatch) {
       return { success: false, error: 'Email or password is incorrect.' };

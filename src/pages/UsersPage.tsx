@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Shield,
   Plus,
@@ -61,6 +62,10 @@ export function UsersPage() {
     activeRole,
   } = useERPStore();
 
+  const navigate = useNavigate();
+  const userRole = (currentUser?.role || activeRole || 'viewer').toLowerCase();
+  const isOwner = userRole === 'owner' || userRole === 'super_admin';
+
   const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteName, setInviteName] = useState('');
@@ -97,7 +102,6 @@ export function UsersPage() {
   const [newPermModule, setNewPermModule] = useState('');
   const [permSuccessMsg, setPermSuccessMsg] = useState(false);
 
-  const userRole = (currentUser?.role || activeRole || 'viewer').toLowerCase();
   const canManageTeam =
     userRole === 'owner' || userRole === 'admin' || userRole === 'super_admin';
 
@@ -269,6 +273,18 @@ export function UsersPage() {
             </span>
           </div>
 
+          {isOwner && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => navigate('/role-testing')}
+              className="border-amber-500/40 text-amber-700 dark:text-amber-400 hover:bg-amber-500/10 font-bold"
+              title="Test operational role visibility and permissions"
+            >
+              <Shield className="w-4 h-4 mr-1.5 text-amber-500" /> Role Testing
+            </Button>
+          )}
+
           <Button
             variant="primary"
             size="sm"
@@ -287,6 +303,33 @@ export function UsersPage() {
           </Button>
         </div>
       </div>
+
+      {/* Role Testing Development Banner (Strictly visible ONLY to Owner - Requirement 7) */}
+      {isOwner && (
+        <div className="p-4 rounded-xl border border-amber-500/30 bg-amber-500/5 dark:bg-amber-950/20 flex flex-col sm:flex-row sm:items-center justify-between gap-4 text-xs">
+          <div className="flex items-start gap-3">
+            <div className="p-2 rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400 shrink-0">
+              <Shield className="w-5 h-5" />
+            </div>
+            <div>
+              <span className="font-bold text-amber-950 dark:text-amber-200 text-sm">
+                Development Role Testing Portal
+              </span>
+              <p className="text-slate-600 dark:text-slate-400 text-xs mt-0.5 leading-relaxed">
+                Test what each operational role sees (Production Manager, Warehouse Manager, Sales Manager, Accountant, Auditor) using real Supabase Auth accounts without invitation emails.
+              </p>
+            </div>
+          </div>
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={() => navigate('/role-testing')}
+            className="shrink-0 bg-amber-600 hover:bg-amber-700 text-white font-semibold"
+          >
+            Open Role Testing
+          </Button>
+        </div>
+      )}
 
       {/* Limit Alert Banner if near or at limit */}
       {isAtLimit && (

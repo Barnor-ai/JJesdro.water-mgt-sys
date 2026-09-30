@@ -18,6 +18,7 @@ import {
   getProductPackaging,
   getProductDisplayName,
 } from './utils';
+import { isDateInPeriod } from './dateUtils';
 
 export interface WarehouseStockBreakdown {
   warehouseName: string;
@@ -130,6 +131,9 @@ export function calculateStockSummaries(params: {
   filterCategory?: 'all' | 'Bottled Water' | 'Sachet Water';
   filterWarehouse?: string;
   searchTerm?: string;
+  period?: string;
+  customStartDate?: string;
+  customEndDate?: string;
 }): {
   items: ProductStockSummaryItem[];
   totals: StockSummaryTotals;
@@ -144,9 +148,14 @@ export function calculateStockSummaries(params: {
     filterCategory = 'all',
     filterWarehouse = 'all',
     searchTerm = '',
+    period = 'All Time',
+    customStartDate = '',
+    customEndDate = '',
   } = params;
 
-  // 1. Multi-tenant filter
+  const isPeriodFilterActive = Boolean(period && period !== 'All Time');
+
+  // 1. Multi-tenant and Period filter
   const orgGoods = finishedGoods.filter(
     (fg) => !currentOrganizationId || !fg.organization_id || fg.organization_id === currentOrganizationId
   );
@@ -154,13 +163,22 @@ export function calculateStockSummaries(params: {
     (bt) => !currentOrganizationId || !bt.organization_id || bt.organization_id === currentOrganizationId
   );
   const orgBatches = productionBatches.filter(
-    (b) => !currentOrganizationId || !b.organization_id || b.organization_id === currentOrganizationId
+    (b) =>
+      (!currentOrganizationId || !b.organization_id || b.organization_id === currentOrganizationId) &&
+      (!isPeriodFilterActive ||
+        isDateInPeriod(b.production_date || b.created_at, period, customStartDate, customEndDate))
   );
   const orgSales = sales.filter(
-    (s) => !currentOrganizationId || !s.organization_id || s.organization_id === currentOrganizationId
+    (s) =>
+      (!currentOrganizationId || !s.organization_id || s.organization_id === currentOrganizationId) &&
+      (!isPeriodFilterActive ||
+        isDateInPeriod(s.sale_date || s.created_at, period, customStartDate, customEndDate))
   );
   const orgTransactions = transactions.filter(
-    (tx) => !currentOrganizationId || !tx.organization_id || tx.organization_id === currentOrganizationId
+    (tx) =>
+      (!currentOrganizationId || !tx.organization_id || tx.organization_id === currentOrganizationId) &&
+      (!isPeriodFilterActive ||
+        isDateInPeriod(tx.created_at, period, customStartDate, customEndDate))
   );
 
   // 2. Build list of unique products across bottleTypes and finishedGoods
@@ -374,6 +392,9 @@ export function calculateProductMovementLedger(
     sales: Sale[];
     transactions: WarehouseTransaction[];
     currentOrganizationId?: string;
+    period?: string;
+    customStartDate?: string;
+    customEndDate?: string;
   }
 ): StockMovementLedgerItem[] {
   const {
@@ -382,6 +403,9 @@ export function calculateProductMovementLedger(
     sales = [],
     transactions = [],
     currentOrganizationId,
+    period = 'All Time',
+    customStartDate = '',
+    customEndDate = '',
   } = params;
 
   const fg = finishedGoods.find((g) => g.bottle_size === size);
@@ -533,6 +557,15 @@ export function calculateProductMovementLedger(
       operator: ev.operator,
     };
   });
+
+  // 7. Filter by period if active
+  if (period && period !== 'All Time') {
+    return ledger.filter(
+      (item) =>
+        item.transactionType === 'Opening Balance' ||
+        isDateInPeriod(item.date, period, customStartDate, customEndDate)
+    );
+  }
 
   return ledger;
 }

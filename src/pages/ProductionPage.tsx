@@ -612,13 +612,20 @@ export function ProductionPage() {
         <form onSubmit={handleCreateBatch} className="space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Select
-              label="Bottle Size SKU"
+              label="Product / SKU Line"
               value={bottleSize}
-              onChange={(e) => setBottleSize(e.target.value as BottleSize)}
+              onChange={(e) => {
+                const newSize = e.target.value as BottleSize;
+                setBottleSize(newSize);
+                if (newSize === '500ml-sachet') {
+                  const sachetMachine = machines.find((m) => m.id === 'm-6' || m.name.toLowerCase().includes('sachet'));
+                  if (sachetMachine) setMachineUsed(sachetMachine.name);
+                }
+              }}
             >
               {bottleTypes.map((bt) => (
                 <option key={bt.id} value={bt.size}>
-                  {bt.size} - {bt.name}
+                  {bt.name} ({bt.size} - {bt.unit || (bt.size === '500ml-sachet' ? 'Sachet' : 'Bottle')})
                 </option>
               ))}
             </Select>
@@ -664,7 +671,7 @@ export function ProductionPage() {
             />
 
             <Input
-              label="Total Units Produced (Gross)"
+              label={`Total Units Produced (Gross ${bottleSize === '500ml-sachet' ? 'Sachets' : 'Bottles'})`}
               type="number"
               min="1"
               value={quantityProduced}
@@ -673,7 +680,7 @@ export function ProductionPage() {
             />
 
             <Input
-              label="Rejected Bottles (QC Defect)"
+              label={`Rejected Units (${bottleSize === '500ml-sachet' ? 'Sealing / Burst Defect' : 'QC Defect'})`}
               type="number"
               min="0"
               value={rejectedQuantity}
@@ -682,7 +689,7 @@ export function ProductionPage() {
             />
 
             <Input
-              label="Damaged Bottles / Caps"
+              label={`Damaged Units (${bottleSize === '500ml-sachet' ? 'Film Waste / Leaks' : 'Bottles / Caps'})`}
               type="number"
               min="0"
               value={damagedBottles}

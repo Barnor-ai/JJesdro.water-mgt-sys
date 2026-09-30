@@ -83,6 +83,7 @@ import {
   checkSupabaseConnection,
 } from '../lib/supabase';
 import { supabaseDataService } from '../lib/supabaseDataService';
+import { sendUserInvitation, resendUserInvitation } from '../lib/invitationService';
 
 const STORAGE_KEY_PREFIX = 'h2o_erp_v2_';
 
@@ -336,6 +337,31 @@ const globalState: ERPStoreState = {
   systemOnline: true,
   storageEngine: 'IndexedDB & Local Offline Storage Engine',
 };
+
+// Ensure Sachet Water 500 ml product, finished goods, and production machine are registered in state
+if (!globalState.bottleTypes.some((b) => b.size === '500ml-sachet')) {
+  const sachetBt = initialBottleTypes.find((b) => b.size === '500ml-sachet');
+  if (sachetBt) {
+    globalState.bottleTypes = [...globalState.bottleTypes, sachetBt];
+    saveStored('bottle_types', globalState.bottleTypes);
+  }
+}
+
+if (!globalState.finishedGoods.some((fg) => fg.bottle_size === '500ml-sachet')) {
+  const sachetFg = initialFinishedGoods.find((fg) => fg.bottle_size === '500ml-sachet');
+  if (sachetFg) {
+    globalState.finishedGoods = [...globalState.finishedGoods, sachetFg];
+    saveStored('inventory', globalState.finishedGoods);
+  }
+}
+
+if (!globalState.machines.some((m) => m.id === 'm-6' || m.name.toLowerCase().includes('sachet'))) {
+  const sachetMachine = initialMachines.find((m) => m.id === 'm-6');
+  if (sachetMachine) {
+    globalState.machines = [...globalState.machines, sachetMachine];
+    saveStored('machines', globalState.machines);
+  }
+}
 
 const listeners = new Set<(state: ERPStoreState) => void>();
 
@@ -2979,6 +3005,7 @@ export function useERPStore() {
   const inviteMember = async (email: string, role: OrganizationRole, invited_by_name?: string) => {
     const cleanEmail = email.trim().toLowerCase();
     const orgId = globalState.currentOrganization?.id || 'org-default';
+    const orgName = globalState.currentOrganization?.name || 'H2O Workspace';
 
     // 1. Check if user is already an active member of this organization
     const existingMember = globalState.organizationMembers.find(
@@ -2987,94 +3014,117 @@ export function useERPStore() {
     if (existingMember) {
       addNotification({
         title: 'Already a Member',
-        message: `${email} is already an active staff member in this organization.`,
+        message: `${cleanEmail} is already an active staff member in this organization.`,
         type: 'warning',
       });
-      return { success: false, error: `${email} is already an active staff member in this organization.` };
+      return { success: false, error: `${cleanEmail} is already an active staff member in this organization.` };
     }
 
-    // 2. Check if a pending invite already exists for this email
-    const existingInvite = globalState.invitations.find(
-      (i) => i.organization_id === orgId && i.email.toLowerCase() === cleanEmail && i.status === 'pending'
-    );
-    if (existingInvite) {
-      // Refresh the existing invitation with new expiry and role
-      const refreshed: Invitation = {
-        ...existingInvite,
-        role,
-        expires_at: new Date(Date.now() + 7 * 86400000).toISOString(),
-        created_at: new Date().toISOString(),
-      };
-      globalState.invitations = globalState.invitations.map((i) => (i.id === existingInvite.id ? refreshed : i));
-      saveStored('invitations', globalState.invitations);
-      saveTableToIndexedDB('invitations', globalState.invitations);
-      enqueueSyncTransaction({
-        entity_type: 'invitations',
-        entity_id: refreshed.id,
-        action: 'UPDATE',
-        payload: refreshed,
-        organization_id: orgId,
-      });
-
-      if (isSupabaseConfigured) {
-        supabaseDataService.upsertRecord('invitations', refreshed).catch(() => {});
-      }
-
+    // 2. Check plan capacity
+    const activePlan =
+      globalState.subscriptionPlans.find((p) => p.id === globalState.currentSubscription?.plan_id) ||
+      globalState.subscriptionPlans[1];
+    const activeCount = globalState.organizationMembers.filter(
+      (m) => m.organization_id === orgId && m.is_active
+    ).length;
+    if (activeCount >= activePlan.maxUsers) {
+      const limitErr = `You have reached your ${activePlan.maxUsers} user limit on the ${activePlan.name} plan. Upgrade to invite additional staff.`;
       addNotification({
-        title: 'Invitation Refreshed',
-        message: `Existing pending invitation for ${email} was refreshed with role ${(role || 'operator').replace('_', ' ').toUpperCase()} (valid for 7 days).`,
-        type: 'info',
+        title: 'Plan Limit Reached',
+        message: limitErr,
+        type: 'warning',
       });
-      notify();
-      return { success: true, invitation: refreshed, refreshed: true };
+      return { success: false, error: limitErr };
     }
 
-    const secureToken = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
-    const newInvite: Invitation = {
-      id: `inv-${Date.now()}`,
-      organization_id: orgId,
-      organization_name: globalState.currentOrganization.name,
+    // 3. Dispatch server-side invitation via Supabase Edge Function
+    const result = await sendUserInvitation({
       email: cleanEmail,
       role,
-      token: secureToken,
+      fullName: invited_by_name,
+      organizationId: orgId,
+      organizationName: orgName,
+    });
+
+    if (!result.success) {
+      addNotification({
+        title: 'Invitation Failed',
+        message: result.error || 'Invitation could not be sent.',
+        type: 'alert',
+      });
+      return {
+        success: false,
+        error: result.error,
+        errorCode: result.errorCode,
+        diagnostic: result.diagnostic,
+        inviteLink: result.inviteLink,
+      };
+    }
+
+    // 4. Update local store with the confirmed invitation record from backend
+    const confirmedInvite: Invitation = result.invitation || {
+      id: `inv-${Date.now()}`,
+      organization_id: orgId,
+      organization_name: orgName,
+      email: cleanEmail,
+      role,
+      token: result.inviteLink?.split('token=')[1] || `tok-${Date.now()}`,
       invited_by: globalState.currentUser?.id || 'owner',
-      invited_by_name: invited_by_name || globalState.currentUser?.full_name || 'Owner',
+      invited_by_name: invited_by_name || globalState.currentUser?.full_name || 'Administrator',
       expires_at: new Date(Date.now() + 7 * 86400000).toISOString(),
       status: 'pending',
       created_at: new Date().toISOString(),
     };
 
-    globalState.invitations = [newInvite, ...globalState.invitations];
+    const remainingInvites = globalState.invitations.filter(
+      (i) => !(i.organization_id === orgId && i.email.toLowerCase() === cleanEmail)
+    );
+    globalState.invitations = [confirmedInvite, ...remainingInvites];
     saveStored('invitations', globalState.invitations);
     saveTableToIndexedDB('invitations', globalState.invitations);
 
-    enqueueSyncTransaction({
-      entity_type: 'invitations',
-      entity_id: newInvite.id,
-      action: 'CREATE',
-      payload: newInvite,
-      organization_id: orgId,
+    addAuditLog('CREATE', 'invitations', confirmedInvite.id, {
+      email: cleanEmail,
+      role,
+      emailSent: result.emailSent,
     });
 
-    if (isSupabaseConfigured) {
-      supabaseDataService.upsertRecord('invitations', newInvite).catch(() => {});
-    }
-
-    addAuditLog('CREATE', 'invitations', newInvite.id, { email: cleanEmail, role });
     addNotification({
-      title: 'Invitation Dispatched',
-      message: `Invitation generated for ${email} with role ${(role || 'operator').replace('_', ' ').toUpperCase()}. Link valid for 7 days.`,
-      type: 'success',
+      title: result.emailSent ? 'Invitation Dispatched' : 'Invitation Link Ready',
+      message: result.message || `Invitation dispatched to ${cleanEmail}.`,
+      type: result.emailSent ? 'success' : 'info',
     });
 
     notify();
-    return { success: true, invitation: newInvite };
+    return {
+      success: true,
+      emailSent: result.emailSent,
+      invitation: confirmedInvite,
+      inviteLink: result.inviteLink,
+      message: result.message,
+      diagnostic: result.diagnostic,
+    };
   };
 
   const resendInvitation = async (id: string) => {
     const invite = globalState.invitations.find((i) => i.id === id);
     if (!invite) {
       return { success: false, error: 'Invitation record not found.' };
+    }
+
+    const result = await resendUserInvitation(id, invite.email, invite.organization_id);
+
+    if (!result.success) {
+      addNotification({
+        title: 'Resend Failed',
+        message: result.error || 'Failed to resend invitation email.',
+        type: 'alert',
+      });
+      return {
+        success: false,
+        error: result.error,
+        diagnostic: result.diagnostic,
+      };
     }
 
     const refreshed: Invitation = {
@@ -3087,27 +3137,21 @@ export function useERPStore() {
     saveStored('invitations', globalState.invitations);
     saveTableToIndexedDB('invitations', globalState.invitations);
 
-    enqueueSyncTransaction({
-      entity_type: 'invitations',
-      entity_id: refreshed.id,
-      action: 'UPDATE',
-      payload: refreshed,
-      organization_id: refreshed.organization_id,
-    });
-
-    if (isSupabaseConfigured) {
-      supabaseDataService.upsertRecord('invitations', refreshed).catch(() => {});
-    }
-
     addAuditLog('UPDATE', 'invitations', refreshed.id, { action: 'resend', email: refreshed.email });
     addNotification({
-      title: 'Invitation Re-sent',
-      message: `Fresh 7-day invitation link active for ${refreshed.email}.`,
+      title: 'Invitation Resent',
+      message: result.message || `Invitation email resent successfully to ${refreshed.email}.`,
       type: 'success',
     });
 
     notify();
-    return { success: true, invitation: refreshed };
+    return {
+      success: true,
+      emailSent: result.emailSent,
+      invitation: refreshed,
+      message: result.message,
+      diagnostic: result.diagnostic,
+    };
   };
 
   const acceptInvitation = async (token: string, password?: string, fullName?: string) => {

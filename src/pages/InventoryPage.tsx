@@ -168,7 +168,22 @@ export function InventoryPage({ onOpenScanner }: { onOpenScanner: () => void }) 
                         className="hover:bg-slate-50/50 dark:hover:bg-slate-800/40 transition-colors"
                       >
                         <td className="p-3.5 pl-5 font-sans font-bold text-slate-900 dark:text-white text-sm">
-                          {fg.bottle_size}
+                          <div className="flex items-center gap-1.5">
+                            <span>
+                              {fg.product_name ||
+                                (fg.bottle_size === '500ml-sachet'
+                                  ? 'Sachet Water 500 ml'
+                                  : `Bottled Water ${fg.bottle_size}`)}
+                            </span>
+                            {fg.bottle_size === '500ml-sachet' && (
+                              <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase bg-cyan-500 text-white tracking-wider">
+                                SACHET
+                              </span>
+                            )}
+                          </div>
+                          <span className="text-[10px] text-slate-400 font-mono block">
+                            {fg.bottle_size} • Unit: {fg.unit || (fg.bottle_size === '500ml-sachet' ? 'Sachet' : 'Bottle')}
+                          </span>
                         </td>
                         <td className="p-3 font-sans text-slate-500 flex items-center gap-1">
                           <MapPin className="w-3 h-3 text-slate-400" /> {fg.location}

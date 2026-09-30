@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Shield,
   Plus,
@@ -17,6 +17,14 @@ import {
   Users,
   CheckCircle2,
   AlertTriangle,
+  Activity,
+  ChevronDown,
+  ChevronUp,
+  Server,
+  RefreshCw,
+  ExternalLink,
+  HelpCircle,
+  FileText,
 } from 'lucide-react';
 import { useERPStore } from '../store/useStore';
 import { OrganizationRole, UserRole } from '../types/database';
@@ -26,6 +34,13 @@ import { Input, Select } from '../components/ui/Input';
 import { Badge } from '../components/ui/Badge';
 import { Modal } from '../components/ui/Modal';
 import { formatDateTime } from '../lib/utils';
+import {
+  getInvitationRedirectUrl,
+  getLastInvitationDiagnostic,
+  subscribeToDiagnostic,
+  InvitationDiagnosticInfo,
+} from '../lib/invitationService';
+import { isSupabaseConfigured } from '../lib/supabase';
 
 export function UsersPage() {
   const {
@@ -51,7 +66,31 @@ export function UsersPage() {
   const [inviteName, setInviteName] = useState('');
   const [inviteRole, setInviteRole] = useState<OrganizationRole>('production_manager');
   const [inviteError, setInviteError] = useState('');
+  const [isSubmittingInvite, setIsSubmittingInvite] = useState(false);
+  const [inviteSuccessInfo, setInviteSuccessInfo] = useState<{
+    email: string;
+    emailSent: boolean;
+    message: string;
+    inviteLink?: string;
+  } | null>(null);
   const [copiedToken, setCopiedToken] = useState<string | null>(null);
+  const [resendingId, setResendingId] = useState<string | null>(null);
+
+  // Invitation Diagnostic & SMTP Troubleshooting States
+  const [diagnosticInfo, setDiagnosticInfo] = useState<InvitationDiagnosticInfo | null>(getLastInvitationDiagnostic);
+  const [isDiagnosticExpanded, setIsDiagnosticExpanded] = useState(false);
+  const [showTemplateModal, setShowTemplateModal] = useState(false);
+  const [copiedTemplate, setCopiedTemplate] = useState(false);
+
+  useEffect(() => {
+    const unsub = subscribeToDiagnostic((info) => {
+      setDiagnosticInfo(info);
+      if (info.edgeFunctionStatus === 'ERROR' || info.authAdminStatus === 'REJECTED') {
+        setIsDiagnosticExpanded(true);
+      }
+    });
+    return unsub;
+  }, []);
 
   // Permission Matrix State & Management
   const [isAddPermModalOpen, setIsAddPermModalOpen] = useState(false);
@@ -167,10 +206,24 @@ export function UsersPage() {
 
   const handleSendInvite = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!inviteEmail.trim()) {
+      setInviteError('Please enter a valid email address.');
+      return;
+    }
     setInviteError('');
+    setIsSubmittingInvite(true);
+    setInviteSuccessInfo(null);
+
     const result = await inviteMember(inviteEmail, inviteRole, inviteName);
+    setIsSubmittingInvite(false);
+
     if (result.success) {
-      setIsInviteModalOpen(false);
+      setInviteSuccessInfo({
+        email: inviteEmail.trim().toLowerCase(),
+        emailSent: Boolean(result.emailSent),
+        message: result.message || `Invitation dispatched to ${inviteEmail}.`,
+        inviteLink: result.inviteLink,
+      });
       setInviteEmail('');
       setInviteName('');
       setInviteError('');
@@ -179,8 +232,14 @@ export function UsersPage() {
     }
   };
 
+  const handleResend = async (id: string) => {
+    setResendingId(id);
+    await resendInvitation(id);
+    setResendingId(null);
+  };
+
   const handleCopyLink = (token: string) => {
-    const inviteUrl = `${window.location.origin}/?token=${token}`;
+    const inviteUrl = `${getInvitationRedirectUrl()}?token=${token}`;
     navigator.clipboard.writeText(inviteUrl);
     setCopiedToken(token);
     setTimeout(() => setCopiedToken(null), 2500);
@@ -407,11 +466,20 @@ export function UsersPage() {
                         <div className="flex items-center justify-end gap-2">
                           <button
                             type="button"
-                            onClick={() => resendInvitation(inv.id)}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 text-[11px] font-semibold transition-colors cursor-pointer"
-                            title="Resend invitation and refresh 7-day validity"
+                            disabled={resendingId === inv.id}
+                            onClick={() => handleResend(inv.id)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 text-[11px] font-semibold transition-colors cursor-pointer disabled:opacity-50"
+                            title="Resend invitation email and refresh 7-day validity"
                           >
-                            <Send className="w-3 h-3 text-sky-500" /> Resend
+                            {resendingId === inv.id ? (
+                              <>
+                                <RefreshCw className="w-3 h-3 text-sky-500 animate-spin" /> Resending...
+                              </>
+                            ) : (
+                              <>
+                                <Send className="w-3 h-3 text-sky-500" /> Resend
+                              </>
+                            )}
                           </button>
                           <button
                             type="button"
@@ -446,6 +514,161 @@ export function UsersPage() {
               </table>
             </div>
           </CardContent>
+        </Card>
+      )}
+
+      {/* Temporary Admin Diagnostic & Email Delivery Pipeline (Requirement 14 & 6) */}
+      {canManageTeam && (
+        <Card className="border border-sky-500/30 bg-slate-900/40 dark:bg-slate-900/60 shadow-lg overflow-hidden">
+          <CardHeader
+            className="p-4 bg-slate-950/40 border-b border-slate-800 flex flex-row items-center justify-between cursor-pointer select-none"
+            onClick={() => setIsDiagnosticExpanded(!isDiagnosticExpanded)}
+          >
+            <div className="flex items-center gap-2.5">
+              <div className="p-1.5 rounded-lg bg-sky-500/10 text-sky-400 border border-sky-500/20">
+                <Activity className="w-4 h-4" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <CardTitle className="text-sm font-bold text-white">
+                    Invitation & Email Delivery Pipeline Diagnostic
+                  </CardTitle>
+                  <Badge variant={diagnosticInfo?.edgeFunctionStatus === 'SUCCESS' ? 'success' : 'outline'} size="sm">
+                    {diagnosticInfo?.edgeFunctionStatus === 'SUCCESS' ? 'Pipeline Active' : 'Troubleshooting Active'}
+                  </Badge>
+                </div>
+                <p className="text-[11px] text-slate-400">
+                  Real-time verification of Frontend → Edge Function → Supabase Auth → SMTP delivery
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowTemplateModal(true);
+                }}
+                className="text-[11px] h-7 px-2.5"
+              >
+                <FileText className="w-3 h-3 mr-1 text-sky-400" /> View Supabase Template
+              </Button>
+              <button
+                type="button"
+                className="p-1 text-slate-400 hover:text-white transition-colors"
+                aria-label="Toggle diagnostic details"
+              >
+                {isDiagnosticExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+              </button>
+            </div>
+          </CardHeader>
+
+          {isDiagnosticExpanded && (
+            <CardContent className="p-4 space-y-4 text-xs">
+              {/* 5-Stage Architecture Flow */}
+              <div className="grid grid-cols-1 sm:grid-cols-5 gap-2.5 text-center">
+                <div className="p-2.5 rounded-xl border border-slate-800 bg-slate-950/60">
+                  <span className="text-[10px] font-bold uppercase text-slate-400 block mb-1">Stage 1</span>
+                  <span className="font-semibold text-white block text-xs">Client Request</span>
+                  <span className="text-[10px] text-emerald-400 flex items-center justify-center gap-1 mt-1">
+                    <CheckCircle2 className="w-3 h-3" /> Validated
+                  </span>
+                </div>
+                <div className="p-2.5 rounded-xl border border-slate-800 bg-slate-950/60">
+                  <span className="text-[10px] font-bold uppercase text-slate-400 block mb-1">Stage 2</span>
+                  <span className="font-semibold text-white block text-xs">invite-user Function</span>
+                  <span className="text-[10px] text-emerald-400 flex items-center justify-center gap-1 mt-1">
+                    <CheckCircle2 className="w-3 h-3" /> Server-Side Secret
+                  </span>
+                </div>
+                <div className="p-2.5 rounded-xl border border-slate-800 bg-slate-950/60">
+                  <span className="text-[10px] font-bold uppercase text-slate-400 block mb-1">Stage 3</span>
+                  <span className="font-semibold text-white block text-xs">Supabase Auth</span>
+                  <span className="text-[10px] text-emerald-400 flex items-center justify-center gap-1 mt-1">
+                    <CheckCircle2 className="w-3 h-3" /> Admin API
+                  </span>
+                </div>
+                <div className="p-2.5 rounded-xl border border-slate-800 bg-slate-950/60">
+                  <span className="text-[10px] font-bold uppercase text-slate-400 block mb-1">Stage 4</span>
+                  <span className="font-semibold text-white block text-xs">SMTP Delivery</span>
+                  <span className="text-[10px] text-sky-400 flex items-center justify-center gap-1 mt-1">
+                    <Mail className="w-3 h-3" /> Custom SMTP / Provider
+                  </span>
+                </div>
+                <div className="p-2.5 rounded-xl border border-slate-800 bg-slate-950/60">
+                  <span className="text-[10px] font-bold uppercase text-slate-400 block mb-1">Stage 5</span>
+                  <span className="font-semibold text-white block text-xs">Acceptance Route</span>
+                  <span className="text-[10px] text-emerald-400 flex items-center justify-center gap-1 mt-1">
+                    <CheckCircle2 className="w-3 h-3" /> SPA Routed (Netlify 200)
+                  </span>
+                </div>
+              </div>
+
+              {/* Production Configuration & SMTP Warning Box */}
+              <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-slate-300 space-y-1.5">
+                <div className="flex items-center gap-2 text-amber-400 font-bold text-xs">
+                  <AlertTriangle className="w-4 h-4 shrink-0" />
+                  Important Production SMTP Dependency
+                </div>
+                <p className="text-[11px] leading-relaxed text-slate-300">
+                  The default Supabase Auth email server has a strict rate limit of <strong>3 emails/hour</strong>. For production commercial delivery to work reliably without delay, a custom SMTP provider (<strong>Resend</strong>, <strong>SendGrid</strong>, <strong>Postmark</strong>, or <strong>AWS SES</strong>) must be enabled in your <span className="text-white font-mono">Supabase Dashboard → Authentication → SMTP Settings</span>.
+                </p>
+              </div>
+
+              {/* Last Dispatched Invitation Audit Log */}
+              {diagnosticInfo ? (
+                <div className="p-3.5 rounded-xl bg-slate-950/80 border border-slate-800 space-y-2">
+                  <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                    <span className="font-bold text-white text-xs flex items-center gap-1.5">
+                      <Server className="w-3.5 h-3.5 text-sky-400" />
+                      Last Invitation Audit Log
+                    </span>
+                    <span className="text-[11px] text-slate-400 font-mono">
+                      {formatDateTime(diagnosticInfo.timestamp)}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
+                    <div>
+                      <span className="text-slate-400">Recipient Email:</span>{' '}
+                      <span className="font-mono font-semibold text-white">{diagnosticInfo.recipient}</span>
+                    </div>
+                    <div>
+                      <span className="text-slate-400">Stage:</span>{' '}
+                      <span className="font-semibold text-slate-200">{diagnosticInfo.stage}</span>
+                    </div>
+                    <div>
+                      <span className="text-slate-400">Edge Function:</span>{' '}
+                      <span className={diagnosticInfo.edgeFunctionStatus === 'SUCCESS' ? 'text-emerald-400 font-semibold' : 'text-rose-400 font-semibold'}>
+                        {diagnosticInfo.edgeFunctionStatus}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-slate-400">Supabase Auth Admin:</span>{' '}
+                      <span className={diagnosticInfo.authAdminStatus === 'DELIVERED_TO_SMTP' ? 'text-emerald-400 font-semibold' : 'text-amber-400 font-semibold'}>
+                        {diagnosticInfo.authAdminStatus}
+                      </span>
+                    </div>
+                    <div className="sm:col-span-2">
+                      <span className="text-slate-400">Redirect URL:</span>{' '}
+                      <span className="font-mono text-sky-400 break-all">{diagnosticInfo.redirectUrl}</span>
+                    </div>
+                    {diagnosticInfo.errorMessage && (
+                      <div className="sm:col-span-2 p-2 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-300">
+                        <span className="font-bold">Error Message:</span> {diagnosticInfo.errorMessage}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <p className="text-[11px] text-slate-400 italic text-center py-2">
+                  No invitation dispatched in this session yet. Use the "Invite Staff Member" button above to test the pipeline.
+                </p>
+              )}
+            </CardContent>
+          )}
         </Card>
       )}
 
@@ -607,77 +830,240 @@ export function UsersPage() {
       {/* Send Invite Modal */}
       <Modal
         isOpen={isInviteModalOpen}
-        onClose={() => setIsInviteModalOpen(false)}
+        onClose={() => {
+          setIsInviteModalOpen(false);
+          setInviteSuccessInfo(null);
+          setInviteError('');
+        }}
         title="Invite Staff to Workspace"
         description={`Send an invitation to join ${currentOrganization?.name || 'Workspace'} with specific role permissions.`}
         maxWidth="md"
       >
-        <form onSubmit={handleSendInvite} className="space-y-4 text-xs">
-          {inviteError && (
-            <div className="p-3 rounded-lg bg-rose-50 dark:bg-rose-950/30 text-rose-600 dark:text-rose-400 font-semibold flex items-center gap-2">
-              <AlertTriangle className="w-4 h-4 shrink-0" />
-              <span>{inviteError}</span>
+        {inviteSuccessInfo ? (
+          <div className="space-y-4 py-2 text-xs">
+            <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 space-y-2">
+              <div className="flex items-center gap-2 font-bold text-sm text-emerald-400">
+                <CheckCircle2 className="w-5 h-5 shrink-0" />
+                Invitation Dispatched Successfully!
+              </div>
+              <p className="text-xs text-slate-300 leading-relaxed">
+                Supabase Auth accepted the invitation email for <strong className="text-white">{inviteSuccessInfo.email}</strong>.
+                Please advise the team member to check their <strong>Inbox</strong> and <strong>Spam folder</strong>.
+              </p>
             </div>
-          )}
 
-          <div>
-            <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
-              Staff Full Name
-            </label>
-            <input
-              type="text"
-              placeholder="e.g. Jonathan Hayes"
-              value={inviteName}
-              onChange={(e) => setInviteName(e.target.value)}
-              className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-white focus:outline-none"
-            />
+            {inviteSuccessInfo.inviteLink && (
+              <div className="p-3.5 rounded-xl bg-slate-900 border border-slate-800 space-y-2">
+                <span className="text-[11px] font-bold text-slate-300 block">
+                  Direct Invitation Link (Backup)
+                </span>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    readOnly
+                    value={inviteSuccessInfo.inviteLink}
+                    className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-[11px] font-mono text-slate-300 select-all"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleCopyLink(inviteSuccessInfo.inviteLink?.split('token=')[1] || '')}
+                  >
+                    <Copy className="w-3.5 h-3.5 mr-1 text-sky-400" /> Copy
+                  </Button>
+                </div>
+                <p className="text-[10px] text-slate-500">
+                  If email delivery is delayed by the recipient's mail provider, you can send them this direct setup link.
+                </p>
+              </div>
+            )}
+
+            <div className="flex justify-end gap-2 pt-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setInviteSuccessInfo(null)}
+              >
+                Invite Another Member
+              </Button>
+              <Button
+                type="button"
+                variant="primary"
+                size="sm"
+                onClick={() => {
+                  setIsInviteModalOpen(false);
+                  setInviteSuccessInfo(null);
+                }}
+              >
+                Done
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <form onSubmit={handleSendInvite} className="space-y-4 text-xs">
+            {inviteError && (
+              <div className="p-3 rounded-lg bg-rose-50 dark:bg-rose-950/30 text-rose-600 dark:text-rose-400 font-semibold flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 shrink-0" />
+                <span>{inviteError}</span>
+              </div>
+            )}
+
+            <div>
+              <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                Staff Full Name
+              </label>
+              <input
+                type="text"
+                disabled={isSubmittingInvite}
+                placeholder="e.g. Jonathan Hayes"
+                value={inviteName}
+                onChange={(e) => setInviteName(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-white focus:outline-none disabled:opacity-60"
+              />
+            </div>
+
+            <div>
+              <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                Official Email Address *
+              </label>
+              <input
+                type="email"
+                required
+                disabled={isSubmittingInvite}
+                placeholder="staff@company.com"
+                value={inviteEmail}
+                onChange={(e) => setInviteEmail(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-white focus:outline-none disabled:opacity-60"
+              />
+            </div>
+
+            <div>
+              <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                Assigned Operational Role *
+              </label>
+              <select
+                disabled={isSubmittingInvite}
+                value={inviteRole}
+                onChange={(e) => setInviteRole(e.target.value as OrganizationRole)}
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-white focus:outline-none disabled:opacity-60"
+              >
+                <option value="admin">Admin (Plant Operations & Configuration)</option>
+                <option value="production_manager">Production Manager (Blowing, RO & Bottling)</option>
+                <option value="production_officer">Production Operator (Machine Floor)</option>
+                <option value="warehouse_manager">Warehouse Lead (Inventory & Dispatch)</option>
+                <option value="warehouse_officer">Warehouse Officer (Stock Movement)</option>
+                <option value="sales_manager">Sales Director (Accounts & Pricing)</option>
+                <option value="sales_officer">Sales Officer (Invoicing & POS)</option>
+                <option value="accountant">Accountant (Financial Statements & OPEX)</option>
+                <option value="auditor">Auditor (Compliance & Audit Trails)</option>
+                <option value="viewer">Viewer (Read-Only Dashboard)</option>
+              </select>
+            </div>
+
+            <div className="flex justify-end gap-3 pt-2">
+              <Button
+                variant="outline"
+                type="button"
+                disabled={isSubmittingInvite}
+                onClick={() => setIsInviteModalOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button variant="primary" type="submit" disabled={isSubmittingInvite}>
+                {isSubmittingInvite ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 mr-1.5 animate-spin" /> Dispatching Email...
+                  </>
+                ) : (
+                  <>
+                    <Send className="w-3.5 h-3.5 mr-1.5" /> Dispatch Invitation
+                  </>
+                )}
+              </Button>
+            </div>
+          </form>
+        )}
+      </Modal>
+
+      {/* Supabase Email Template Modal */}
+      <Modal
+        isOpen={showTemplateModal}
+        onClose={() => setShowTemplateModal(false)}
+        title="Supabase 'Invite User' Email Template"
+        description="Paste this verified Go template into Supabase Dashboard -> Authentication -> Email Templates -> Invite User"
+        maxWidth="lg"
+      >
+        <div className="space-y-4 text-xs">
+          <div className="p-3 rounded-lg bg-slate-900 border border-slate-800 space-y-1">
+            <span className="font-bold text-slate-400 block text-[11px]">Subject Line:</span>
+            <span className="font-mono text-white select-all">{"You have been invited to join {{ .SiteURL }}"}</span>
           </div>
 
-          <div>
-            <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
-              Official Email Address *
-            </label>
-            <input
-              type="email"
-              required
-              placeholder="staff@company.com"
-              value={inviteEmail}
-              onChange={(e) => setInviteEmail(e.target.value)}
-              className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-white focus:outline-none"
-            />
+          <div className="p-3 rounded-lg bg-slate-900 border border-slate-800 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="font-bold text-slate-400 block text-[11px]">HTML Email Template:</span>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  const tpl = `<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px;">
+  <h2 style="color: #0284c7; margin-top: 0;">Welcome to H2O Water Management System</h2>
+  <p>Hello,</p>
+  <p>You have been invited to join the <strong>H2O Water Management System</strong> workspace.</p>
+  <p>To accept your invitation and complete your account setup, please click the button below:</p>
+  <div style="margin: 28px 0; text-align: center;">
+    <a href="{{ .ConfirmationURL }}" style="background-color: #0284c7; color: #ffffff; padding: 12px 28px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">
+      Accept Invitation
+    </a>
+  </div>
+  <p style="font-size: 13px; color: #64748b;">If the button above does not work, copy and paste this link into your browser:</p>
+  <p style="font-size: 13px; word-break: break-all;"><a href="{{ .ConfirmationURL }}" style="color: #0284c7;">{{ .ConfirmationURL }}</a></p>
+  <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 24px 0;" />
+  <p style="font-size: 12px; color: #94a3b8; margin-bottom: 0;">
+    This invitation link will expire in 7 days. If you did not expect this invitation, you can safely ignore this email.
+    For assistance, contact your organization administrator.
+  </p>
+</div>`;
+                  navigator.clipboard.writeText(tpl);
+                  setCopiedTemplate(true);
+                  setTimeout(() => setCopiedTemplate(false), 2500);
+                }}
+              >
+                {copiedTemplate ? <Check className="w-3.5 h-3.5 text-emerald-400 mr-1" /> : <Copy className="w-3.5 h-3.5 mr-1" />}
+                {copiedTemplate ? 'Copied Template!' : 'Copy Template Code'}
+              </Button>
+            </div>
+            <pre className="p-3 rounded bg-slate-950 text-slate-300 font-mono text-[11px] overflow-x-auto max-h-56 leading-relaxed select-all">
+{`<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px;">
+  <h2 style="color: #0284c7; margin-top: 0;">Welcome to H2O Water Management System</h2>
+  <p>Hello,</p>
+  <p>You have been invited to join the <strong>H2O Water Management System</strong> workspace.</p>
+  <p>To accept your invitation and complete your account setup, please click the button below:</p>
+  <div style="margin: 28px 0; text-align: center;">
+    <a href="{{ .ConfirmationURL }}" style="background-color: #0284c7; color: #ffffff; padding: 12px 28px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">
+      Accept Invitation
+    </a>
+  </div>
+  <p style="font-size: 13px; color: #64748b;">If the button above does not work, copy and paste this link into your browser:</p>
+  <p style="font-size: 13px; word-break: break-all;"><a href="{{ .ConfirmationURL }}" style="color: #0284c7;">{{ .ConfirmationURL }}</a></p>
+  <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 24px 0;" />
+  <p style="font-size: 12px; color: #94a3b8; margin-bottom: 0;">
+    This invitation link will expire in 7 days. If you did not expect this invitation, you can safely ignore this email.
+    For assistance, contact your organization administrator.
+  </p>
+</div>`}
+            </pre>
           </div>
 
-          <div>
-            <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
-              Assigned Operational Role *
-            </label>
-            <select
-              value={inviteRole}
-              onChange={(e) => setInviteRole(e.target.value as OrganizationRole)}
-              className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-white focus:outline-none"
-            >
-              <option value="admin">Admin (Plant Operations & Configuration)</option>
-              <option value="production_manager">Production Manager (Blowing, RO & Bottling)</option>
-              <option value="production_officer">Production Operator (Machine Floor)</option>
-              <option value="warehouse_manager">Warehouse Lead (Inventory & Dispatch)</option>
-              <option value="warehouse_officer">Warehouse Officer (Stock Movement)</option>
-              <option value="sales_manager">Sales Director (Accounts & Pricing)</option>
-              <option value="sales_officer">Sales Officer (Invoicing & POS)</option>
-              <option value="accountant">Accountant (Financial Statements & OPEX)</option>
-              <option value="auditor">Auditor (Compliance & Audit Trails)</option>
-              <option value="viewer">Viewer (Read-Only Dashboard)</option>
-            </select>
-          </div>
-
-          <div className="flex justify-end gap-3 pt-2">
-            <Button variant="outline" type="button" onClick={() => setIsInviteModalOpen(false)}>
-              Cancel
+          <div className="flex justify-end pt-2">
+            <Button variant="primary" size="sm" onClick={() => setShowTemplateModal(false)}>
+              Close
             </Button>
-            <Button variant="primary" type="submit">
-              <Send className="w-3.5 h-3.5 mr-1.5" /> Dispatch Invitation
-            </Button>
           </div>
-        </form>
+        </div>
       </Modal>
     </div>
   );

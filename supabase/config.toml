@@ -1,0 +1,21 @@
+# Supabase Project Configuration for H2O Water Management SaaS
+project_id = "yfupvprrrawmqftznnde"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "storage", "graphql_public"]
+
+[auth]
+enabled = true
+site_url = "https://jjesdrowater-mgtsys.netlify.app"
+additional_redirect_urls = [
+  "https://jjesdrowater-mgtsys.netlify.app/accept-invitation",
+  "http://localhost:3000/accept-invitation"
+]
+
+[functions.invite-user]
+verify_jwt = true
+
+[functions.paystack-webhook]
+verify_jwt = false

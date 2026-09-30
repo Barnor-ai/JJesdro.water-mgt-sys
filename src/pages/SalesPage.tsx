@@ -13,6 +13,7 @@ import {
   User,
   Sparkles,
   Receipt,
+  AlertTriangle,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { useERPStore } from '../store/useStore';
@@ -54,6 +55,8 @@ export function SalesPage() {
   const [discount, setDiscount] = useState<number>(0);
   const [tax, setTax] = useState<number>(0);
   const [notes, setNotes] = useState('');
+  const [posProductSearch, setPosProductSearch] = useState('');
+  const [stockValidationError, setStockValidationError] = useState<string | null>(null);
   const [cartItems, setCartItems] = useState<
     { bottle_size: BottleSize; quantity: number; unit_price: number }[]
   >([
@@ -92,6 +95,26 @@ export function SalesPage() {
   const handleCreateSale = (e: React.FormEvent) => {
     e.preventDefault();
     if (cartItems.length === 0) return;
+
+    // Validate that available stock is sufficient for every product (Requirement 6)
+    for (const item of cartItems) {
+      const fg = finishedGoods.find((g) => g.bottle_size === item.bottle_size);
+      const available =
+        fg?.available_stock !== undefined
+          ? fg.available_stock
+          : fg?.current_stock !== undefined
+          ? fg.current_stock
+          : 0;
+
+      if (Number(item.quantity) > available) {
+        const unit = item.bottle_size === '500ml-sachet' ? 'sachets' : 'bottles';
+        setStockValidationError(
+          `Insufficient stock for ${item.bottle_size}: ordered ${Number(item.quantity).toLocaleString()} ${unit}, but only ${available.toLocaleString()} ${unit} available in warehouse.`
+        );
+        return;
+      }
+    }
+    setStockValidationError(null);
 
     const invoiceNumber = generateInvoiceNumber(sales.length);
     const finalAmountPaid =
@@ -372,23 +395,68 @@ export function SalesPage() {
             </Select>
           </div>
 
-          {/* Quick SKU Add Buttons */}
-          <div>
-            <label className="block text-xs font-semibold text-slate-500 mb-2">
-              Quick Add SKU to Order:
-            </label>
+          {stockValidationError && (
+            <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-rose-600 dark:text-rose-400 font-semibold text-xs flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 shrink-0" />
+              <span>{stockValidationError}</span>
+            </div>
+          )}
+
+          {/* Quick SKU Add Buttons with Search */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="block text-xs font-semibold text-slate-500">
+                Quick Add SKU to Order:
+              </label>
+              <div className="relative w-48">
+                <Search className="w-3 h-3 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="Filter product..."
+                  value={posProductSearch}
+                  onChange={(e) => setPosProductSearch(e.target.value)}
+                  className="w-full pl-7 pr-2 py-1 rounded-lg text-xs bg-slate-100 dark:bg-slate-800 border-none text-slate-800 dark:text-slate-200 focus:outline-none"
+                />
+              </div>
+            </div>
+
             <div className="flex flex-wrap gap-2">
-              {bottleTypes.map((bt) => (
-                <button
-                  key={bt.id}
-                  type="button"
-                  onClick={() => handleAddItemToCart(bt.size)}
-                  className="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:border-sky-500 text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer"
-                >
-                  <Plus className="w-3.5 h-3.5 text-sky-500" />
-                  {bt.size} (${saleType === 'Wholesale' ? bt.wholesale_price : bt.selling_price})
-                </button>
-              ))}
+              {bottleTypes
+                .filter(
+                  (bt) =>
+                    bt.name.toLowerCase().includes(posProductSearch.toLowerCase()) ||
+                    bt.size.toLowerCase().includes(posProductSearch.toLowerCase()) ||
+                    (bt.category && bt.category.toLowerCase().includes(posProductSearch.toLowerCase()))
+                )
+                .map((bt) => {
+                  const isSachet = bt.size === '500ml-sachet';
+                  const unit = bt.unit || (isSachet ? 'Sachet' : 'Bottle');
+                  const price = saleType === 'Wholesale' ? bt.wholesale_price : bt.selling_price;
+                  const available =
+                    finishedGoods.find((fg) => fg.bottle_size === bt.size)?.available_stock || 0;
+
+                  return (
+                    <button
+                      key={bt.id}
+                      type="button"
+                      onClick={() => handleAddItemToCart(bt.size)}
+                      className={`px-3 py-1.5 rounded-lg border text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
+                        isSachet
+                          ? 'bg-cyan-50 dark:bg-cyan-950/40 border-cyan-200 dark:border-cyan-800 text-cyan-900 dark:text-cyan-200 hover:border-cyan-500'
+                          : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 hover:border-sky-500 text-slate-800 dark:text-slate-200'
+                      }`}
+                    >
+                      <Plus className={`w-3.5 h-3.5 ${isSachet ? 'text-cyan-500' : 'text-sky-500'}`} />
+                      <span>{bt.name}</span>
+                      <span className="font-mono text-slate-500 dark:text-slate-400">
+                        (${price}/{unit})
+                      </span>
+                      <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-mono">
+                        [{available.toLocaleString()} avail]
+                      </span>
+                    </button>
+                  );
+                })}
             </div>
           </div>
 
@@ -397,54 +465,74 @@ export function SalesPage() {
             <table className="w-full text-left text-xs">
               <thead className="bg-slate-50 dark:bg-slate-800/80 text-slate-500 uppercase font-semibold">
                 <tr>
-                  <th className="p-3 pl-4">Bottle Size SKU</th>
-                  <th className="p-3 text-right">Qty (Bottles)</th>
+                  <th className="p-3 pl-4">Product / SKU</th>
+                  <th className="p-3 text-right">Qty (Units)</th>
                   <th className="p-3 text-right">Unit Price ($)</th>
                   <th className="p-3 text-right">Subtotal</th>
                   <th className="p-3 text-center pr-4">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-mono">
-                {cartItems.map((item, idx) => (
-                  <tr key={idx}>
-                    <td className="p-3 pl-4 font-sans font-bold">{item.bottle_size}</td>
-                    <td className="p-3 text-right">
-                      <input
-                        type="number"
-                        min="1"
-                        value={item.quantity}
-                        onChange={(e) =>
-                          handleUpdateItem(idx, 'quantity', Number(e.target.value))
-                        }
-                        className="w-24 px-2 py-1 rounded bg-slate-100 dark:bg-slate-800 text-right font-mono font-bold"
-                      />
-                    </td>
-                    <td className="p-3 text-right">
-                      <input
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        value={item.unit_price}
-                        onChange={(e) =>
-                          handleUpdateItem(idx, 'unit_price', Number(e.target.value))
-                        }
-                        className="w-20 px-2 py-1 rounded bg-slate-100 dark:bg-slate-800 text-right font-mono"
-                      />
-                    </td>
-                    <td className="p-3 text-right font-bold text-sky-600 dark:text-sky-400">
-                      {formatCurrency(item.quantity * item.unit_price)}
-                    </td>
-                    <td className="p-3 text-center pr-4 font-sans">
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveItem(idx)}
-                        className="text-rose-500 hover:text-rose-700 p-1 cursor-pointer"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                {cartItems.map((item, idx) => {
+                  const bt = bottleTypes.find((b) => b.size === item.bottle_size);
+                  const isSachet = item.bottle_size === '500ml-sachet';
+                  const unit = bt?.unit || (isSachet ? 'Sachet' : 'Bottle');
+                  const fg = finishedGoods.find((g) => g.bottle_size === item.bottle_size);
+                  const available = fg?.available_stock !== undefined ? fg.available_stock : fg?.current_stock || 0;
+                  const isOverStock = item.quantity > available;
+
+                  return (
+                    <tr key={idx} className={isOverStock ? 'bg-rose-50/50 dark:bg-rose-950/20' : ''}>
+                      <td className="p-3 pl-4 font-sans font-bold">
+                        <div>
+                          <span>{bt?.name || item.bottle_size}</span>
+                          <span className="text-[10px] text-slate-400 block font-mono">
+                            {item.bottle_size} ({unit}s) • {available.toLocaleString()} in stock
+                          </span>
+                        </div>
+                      </td>
+                      <td className="p-3 text-right">
+                        <input
+                          type="number"
+                          min="1"
+                          value={item.quantity}
+                          onChange={(e) =>
+                            handleUpdateItem(idx, 'quantity', Number(e.target.value))
+                          }
+                          className={`w-24 px-2 py-1 rounded text-right font-mono font-bold ${
+                            isOverStock
+                              ? 'bg-rose-100 dark:bg-rose-900/40 text-rose-600 border border-rose-300'
+                              : 'bg-slate-100 dark:bg-slate-800'
+                          }`}
+                        />
+                      </td>
+                      <td className="p-3 text-right">
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={item.unit_price}
+                          onChange={(e) =>
+                            handleUpdateItem(idx, 'unit_price', Number(e.target.value))
+                          }
+                          className="w-20 px-2 py-1 rounded bg-slate-100 dark:bg-slate-800 text-right font-mono"
+                        />
+                      </td>
+                      <td className="p-3 text-right font-bold text-sky-600 dark:text-sky-400">
+                        {formatCurrency(item.quantity * item.unit_price)}
+                      </td>
+                      <td className="p-3 text-center pr-4 font-sans">
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveItem(idx)}
+                          className="text-rose-500 hover:text-rose-700 p-1 cursor-pointer"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

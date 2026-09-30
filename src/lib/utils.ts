@@ -22,12 +22,24 @@ export function getActiveOrganizationCurrency(): string {
 }
 
 export function formatCurrency(amount: number, currencyOverride?: string): string {
-  const currencyCode = currencyOverride || getActiveOrganizationCurrency();
-  const symbol = getCurrencySymbol(currencyCode);
-  return `${symbol}${Number(amount || 0).toLocaleString('en-US', {
+  const currencyCode = (currencyOverride || getActiveOrganizationCurrency()).toUpperCase();
+  
+  // Guarantee clean GHS prefix for Ghana Cedi to prevent any PDF WinAnsi glyph corruption (GHμ)
+  let symbol: string;
+  if (currencyCode === 'GHS' || currencyCode === 'GH') {
+    symbol = 'GHS ';
+  } else {
+    symbol = getCurrencySymbol(currencyCode);
+    // Sanitize any stray Cedi symbols or corrupted characters
+    symbol = symbol.replace(/GH[μ\u00B5]|GH[₵\u20B5]|[₵\u20B5]/g, 'GHS ');
+  }
+
+  const formattedNumber = Number(amount || 0).toLocaleString('en-US', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
-  })}`;
+  });
+
+  return `${symbol}${formattedNumber}`;
 }
 
 export function formatNumber(num: number): string {
@@ -66,6 +78,34 @@ export function formatDateTime(dateString?: string): string {
   } catch {
     return dateString;
   }
+}
+
+// Product Metadata Helpers
+export function getProductUnit(size: string): string {
+  if (size === '500ml-sachet' || size.toLowerCase().includes('sachet')) {
+    return 'Sachet';
+  }
+  return 'Bottle';
+}
+
+export function getProductCategory(size: string): 'Bottled Water' | 'Sachet Water' {
+  if (size === '500ml-sachet' || size.toLowerCase().includes('sachet')) {
+    return 'Sachet Water';
+  }
+  return 'Bottled Water';
+}
+
+export function getProductPackaging(size: string): string {
+  if (size === '500ml-sachet' || size.toLowerCase().includes('sachet')) {
+    return '500 ml sachet';
+  }
+  return `${size} PET Bottle`;
+}
+
+export function getProductDisplayName(size: string, customName?: string): string {
+  if (customName && customName.trim()) return customName;
+  if (size === '500ml-sachet') return 'Sachet Water 500 ml';
+  return `Bottled Water ${size}`;
 }
 
 // Auto Calculations

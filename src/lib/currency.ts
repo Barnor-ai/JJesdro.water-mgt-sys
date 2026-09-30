@@ -36,7 +36,7 @@ export const COUNTRIES: CountryOption[] = [
 export const SUPPORTED_COUNTRIES = COUNTRIES;
 
 export const CURRENCIES: CurrencyOption[] = [
-  { code: 'GHS', name: 'Ghana Cedi', symbol: 'GH₵ ' },
+  { code: 'GHS', name: 'Ghana Cedi', symbol: 'GHS ' },
   { code: 'USD', name: 'US Dollar', symbol: '$' },
   { code: 'NGN', name: 'Nigerian Naira', symbol: '₦' },
   { code: 'KES', name: 'Kenyan Shilling', symbol: 'KSh ' },

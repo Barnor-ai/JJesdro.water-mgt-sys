@@ -106,6 +106,7 @@ export interface Invitation {
   email: string;
   role: OrganizationRole;
   token: string;
+  branch_id?: string | null;
   invited_by: string;
   invited_by_name?: string;
   expires_at: string;
@@ -156,7 +157,8 @@ export type BottleSize =
   | '1L'
   | '1.5L'
   | '5L'
-  | '19L';
+  | '19L'
+  | '500ml-sachet';
 
 export type ShiftType = 'Morning' | 'Afternoon' | 'Night';
 export type BatchStatus = 'Completed' | 'Pending' | 'Cancelled';
@@ -322,6 +324,9 @@ export interface BottleType {
   branch_id?: string;
   size: BottleSize;
   name: string;
+  category?: 'Bottled Water' | 'Sachet Water';
+  unit?: string;
+  packaging?: string;
   selling_price: number;
   wholesale_price: number;
   cost: number;
@@ -397,6 +402,10 @@ export interface FinishedGoodsInventory {
   branch_id?: string;
   bottle_size: BottleSize;
   bottle_type_id?: string;
+  product_name?: string;
+  category?: 'Bottled Water' | 'Sachet Water';
+  unit?: string;
+  packaging?: string;
   opening_stock: number;
   produced_stock: number;
   sold_stock: number;

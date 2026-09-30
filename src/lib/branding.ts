@@ -102,7 +102,7 @@ export function getCompanyDocumentBranding(): CompanyDocumentBranding {
       taxId: 'TIN-PENDING',
       country: 'Ghana',
       currency: 'GHS',
-      currencySymbol: 'GH₵',
+      currencySymbol: 'GHS ',
       plantName: 'Main Plant',
     };
   }

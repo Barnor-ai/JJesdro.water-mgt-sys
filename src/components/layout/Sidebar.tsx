@@ -5,6 +5,7 @@ import {
   LayoutDashboard,
   Factory,
   Package,
+  Boxes,
   Warehouse,
   ShoppingCart,
   Users,
@@ -170,6 +171,13 @@ export function Sidebar({
       icon: Package,
       roles: ['owner', 'admin', 'factory_manager', 'production_manager', 'warehouse_manager', 'warehouse_officer'],
       badge: lowStockCount > 0 ? `${lowStockCount}` : undefined,
+      group: 'operations',
+    },
+    {
+      name: 'Stock Summary',
+      href: '/stock-summary',
+      icon: Boxes,
+      roles: ['owner', 'admin', 'factory_manager', 'production_manager', 'warehouse_manager', 'sales_manager', 'accountant', 'auditor'],
       group: 'operations',
     },
     {

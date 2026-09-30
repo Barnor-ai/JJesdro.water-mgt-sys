@@ -5,8 +5,19 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 // Browser application client using VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY
 // ==============================================================================
 
+// Helper to normalize Supabase Project base URL
+export function cleanSupabaseUrl(url: string): string {
+  if (!url) return '';
+  return url
+    .trim()
+    .replace(/\/rest\/v1\/?$/, '')
+    .replace(/\/functions\/v1\/?$/, '')
+    .replace(/\/auth\/v1\/?$/, '')
+    .replace(/\/+$/, '');
+}
+
 // Read environment variables
-const rawUrl = (import.meta.env.VITE_SUPABASE_URL || '').trim();
+const rawUrl = cleanSupabaseUrl(import.meta.env.VITE_SUPABASE_URL || '');
 // Support both standard VITE_SUPABASE_PUBLISHABLE_KEY and legacy VITE_SUPABASE_ANON_KEY
 const rawKey = (
   import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ||

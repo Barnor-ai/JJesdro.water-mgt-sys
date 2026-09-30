@@ -12,6 +12,7 @@ import { ProductionDashboard } from './pages/ProductionDashboard';
 import { InventoryDashboard } from './pages/InventoryDashboard';
 import { ProductionPage } from './pages/ProductionPage';
 import { InventoryPage } from './pages/InventoryPage';
+import { StockSummaryPage } from './pages/StockSummaryPage';
 import { SalesPage } from './pages/SalesPage';
 import { CustomersPage } from './pages/CustomersPage';
 import { SuppliersPage } from './pages/SuppliersPage';
@@ -25,6 +26,7 @@ import { BackupRestorePage } from './pages/BackupRestorePage';
 import { BillingPage } from './pages/BillingPage';
 import { ApprovalsPage } from './pages/ApprovalsPage';
 import { UpdatePasswordPage } from './pages/UpdatePasswordPage';
+import { AcceptInvitationPage } from './pages/AcceptInvitationPage';
 import { UpgradeModal } from './components/saas/UpgradeModal';
 import { SessionTimeoutManager } from './components/auth/SessionTimeoutManager';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
@@ -54,6 +56,7 @@ function AppRoutes() {
         <Route path="/warehouse" element={<InventoryDashboard onNavigate={handleNavigate} onOpenScanner={() => {}} />} />
         <Route path="/production" element={<ProductionPage />} />
         <Route path="/inventory" element={<InventoryPage onOpenScanner={() => {}} />} />
+        <Route path="/stock-summary" element={<StockSummaryPage />} />
         <Route path="/machines" element={<MachinesPage />} />
         <Route path="/sales" element={<SalesPage />} />
         <Route path="/customers" element={<CustomersPage />} />
@@ -100,7 +103,9 @@ export function App() {
       <BrowserRouter>
         <Routes>
           <Route path="/update-password" element={<UpdatePasswordPage />} />
-          <Route path="/invite/:token" element={<AuthPage />} />
+          <Route path="/accept-invitation" element={<AcceptInvitationPage />} />
+          <Route path="/accept-invitation/:token" element={<AcceptInvitationPage />} />
+          <Route path="/invite/:token" element={<AcceptInvitationPage />} />
           <Route
             path="/*"
             element={!isAuthenticated ? <AuthPage /> : <AppRoutes />}
